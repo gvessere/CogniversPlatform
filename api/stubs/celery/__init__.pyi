@@ -1,0 +1,33 @@
+from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
+
+T = TypeVar('T')
+
+class Celery:
+    def __init__(
+        self, 
+        name: str, 
+        broker: Optional[str] = None, 
+        backend: Optional[str] = None, 
+        **kwargs: Any
+    ) -> None: ...
+    
+    def task(self, 
+        func: Optional[Callable[..., Any]] = None, 
+        **kwargs: Any
+    ) -> Union[Callable[[Callable[..., T]], Callable[..., T]], Callable[..., Any]]: ...
+    
+    def start(self, **kwargs: Any) -> None: ...
+    
+    def conf(self) -> Dict[str, Any]: ...
+    
+    def update(self, **kwargs: Any) -> None: ...
+    
+    def autodiscover_tasks(self, packages: List[str]) -> None: ...
+    
+    def include(self, modules: List[str]) -> None: ...
+    
+    def worker_main(self, argv: Optional[List[str]] = None) -> None: ...
+    
+    def delay(self, *args: Any, **kwargs: Any) -> Any: ...
+    
+    def apply_async(self, args: Any = None, kwargs: Any = None, **options: Any) -> Any: ... 

@@ -1,0 +1,21 @@
+{
+  "user_id": 1,
+  "events": [
+    {
+      "type": "page_view",
+      "timestamp": "2025-03-10T00:45:00Z",
+      "data": {
+        "page": "homepage",
+        "duration": 120
+      }
+    },
+    {
+      "type": "button_click",
+      "timestamp": "2025-03-10T00:47:00Z",
+      "data": {
+        "element_id": "submit-btn",
+        "target_page": "results"
+      }
+    }
+  ]
+} 

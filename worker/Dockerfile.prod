@@ -1,0 +1,24 @@
+# 🚀 Optimized Celery worker image
+FROM python:3.11-slim
+
+# Security & dependency isolation
+RUN groupadd -r worker && useradd -r -g worker worker
+WORKDIR /app
+RUN chown worker:worker /app
+
+COPY --chown=worker:worker worker/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY api /app/api
+COPY --chown=worker:worker worker .
+
+# Celery + ML workload optimizations
+USER worker
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+# prevent running as root
+ENV C_FORCE_ROOT=0
+
+
+
+# Entrypoint aligns with compose file's command
+CMD ["celery", "-A", "api.celery_app", "worker", "--loglevel=info"]

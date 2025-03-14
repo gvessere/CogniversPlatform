@@ -1,0 +1,87 @@
+# Production Image - Multi-stage build
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
+COPY . .
+
+# Create scripts directory if it doesn't exist
+RUN mkdir -p scripts
+
+# Create type checking script
+RUN echo '#!/bin/bash\n\n\
+echo "Running mypy type checker..."\n\
+# List directories to verify structure\n\
+echo "Directory structure:"\n\
+ls -la\n\n\
+# Find Python files and run mypy on them\n\
+echo "Finding Python files..."\n\
+# Run mypy with namespace packages mode to avoid module resolution issues\n\
+mypy --namespace-packages --explicit-package-bases . --config-file mypy.ini\n\n\
+# Check the exit code\n\
+if [ $? -eq 0 ]; then\n\
+    echo "✅ Type checking passed!"\n\
+    exit 0\n\
+else\n\
+    echo "❌ Type checking failed. Please fix the errors above."\n\
+    exit 1\n\
+fi' > scripts/check_types.sh && \
+chmod +x scripts/check_types.sh
+
+# Create mypy.ini if it doesn't exist
+RUN if [ ! -f mypy.ini ]; then \
+    echo '[mypy]\n\
+python_version = 3.11\n\
+warn_return_any = True\n\
+warn_unused_configs = True\n\
+disallow_untyped_defs = False\n\
+disallow_incomplete_defs = False\n\
+check_untyped_defs = True\n\
+disallow_untyped_decorators = False\n\
+no_implicit_optional = True\n\
+strict_optional = True\n\
+warn_redundant_casts = True\n\
+warn_unused_ignores = True\n\
+warn_no_return = True\n\
+warn_unreachable = True\n\
+namespace_packages = True\n\
+explicit_package_bases = True\n\
+\n\
+# For third-party libraries without type hints\n\
+[mypy.sqlalchemy.*]\n\
+ignore_missing_imports = True\n\
+\n\
+[mypy.fastapi.*]\n\
+ignore_missing_imports = True\n\
+\n\
+[mypy.pydantic.*]\n\
+ignore_missing_imports = True\n\
+\n\
+[mypy.jose.*]\n\
+ignore_missing_imports = True\n\
+\n\
+[mypy.argon2.*]\n\
+ignore_missing_imports = True' > mypy.ini; \
+fi
+
+# Run type checking
+RUN echo "Running type checking..." && \
+    ./scripts/check_types.sh || (echo "Type checking failed. Fix errors before building." && exit 1)
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PATH=/root/.local/bin:$PATH
+ENV ENV=development
+EXPOSE 8000
+
+# Command will be specified in docker-compose.yml

@@ -1,0 +1,95 @@
+from datetime import datetime
+from typing import Optional, Dict, List, Any, TYPE_CHECKING
+from sqlmodel import SQLModel, Field, Relationship
+from sqlalchemy import Column, JSON, Text, Enum as SQLEnum
+from enum import Enum
+
+if TYPE_CHECKING:
+    from models.questionnaire import QuestionnaireResponse, Questionnaire
+
+class ProcessorStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    TESTING = "testing"
+
+class InterpreterType(str, Enum):
+    PYTHON = "python"
+    JAVASCRIPT = "javascript"
+    NONE = "none"
+
+class Processor(SQLModel, table=True):
+    """Admin-defined processor configuration"""
+    __tablename__ = "processors"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    description: str
+    prompt_template: str = Field(sa_column=Column(Text))
+    post_processing_code: Optional[str] = Field(sa_column=Column(Text), default=None)
+    interpreter: InterpreterType = Field(sa_column=Column(SQLEnum(InterpreterType)), default=InterpreterType.NONE)
+    status: ProcessorStatus = Field(sa_column=Column(SQLEnum(ProcessorStatus)), default=ProcessorStatus.TESTING)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    created_by_id: int = Field(foreign_key="user.id")
+    
+    # Relationships
+    questionnaires: List["QuestionnaireProcessorMapping"] = Relationship(back_populates="processor")
+    results: List["ProcessingResult"] = Relationship(back_populates="processor")
+
+class QuestionnaireProcessorMapping(SQLModel, table=True):
+    """Mapping between questionnaires and processors"""
+    __tablename__ = "questionnaire_processor_mappings"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    questionnaire_id: int = Field(foreign_key="questionnaires.id")
+    processor_id: int = Field(foreign_key="processors.id")
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.now)
+    
+    # Relationships
+    questionnaire: "Questionnaire" = Relationship(back_populates="processors")
+    processor: Processor = Relationship(back_populates="questionnaires")
+
+class ProcessingResult(SQLModel, table=True):
+    """Results of processing on questionnaire responses"""
+    __tablename__ = "processing_results"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    questionnaire_response_id: int = Field(foreign_key="questionnaire_responses.id")
+    processor_id: int = Field(foreign_key="processors.id")
+    processor_version: str = Field(nullable=False, max_length=100)
+    raw_output: str = Field(sa_column=Column(Text))
+    processed_output: Optional[Dict] = Field(sa_column=Column(JSON), default=None)
+    status: str = Field(max_length=50, default="completed")  # completed, failed, processing
+    error_message: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    
+    # Relationships
+    questionnaire_response: "QuestionnaireResponse" = Relationship(back_populates="processing_results")
+    processor: Processor = Relationship(back_populates="results")
+    annotations: List["Annotation"] = Relationship(back_populates="processing_result")
+
+class Annotation(SQLModel, table=True):
+    """Annotations extracted from processing results"""
+    __tablename__ = "annotations"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    processing_result_id: int = Field(foreign_key="processing_results.id")
+    start_offset: int
+    end_offset: int
+    class_label: str = Field(max_length=255)
+    explanation: str
+    confidence: Optional[dict] = Field(
+        sa_column=Column(JSON, nullable=True),
+        default=None
+    )
+    created_at: datetime = Field(default_factory=datetime.now)
+    
+    processing_result: ProcessingResult = Relationship(back_populates="annotations")
+
+    class Config:
+        table = True
+        sa_table_args = (
+            {"info": {"indexes": [("created_at", "class_label")]}}
+        ) 

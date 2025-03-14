@@ -1,0 +1,110 @@
+# From: /Users/geryvessere/Documents/src/Cognivers/docker-compose.yml  
+# ALWAYS USE LOCAL ENV FIRST! Avoid hardcoding credentials here.
+services:
+  db:
+    image: postgres:15-alpine
+    env_file: .env  # Shared config
+    environment:
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-postgres}
+      - POSTGRES_DB=${DB_NAME:-cognivers}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cognivers-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"  # Expose port for local development
+    volumes:
+      - redis_data:/data
+    networks:
+      - cognivers-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: 
+      context: ./api
+      dockerfile: Dockerfile.prod
+    env_file: .env
+    environment:
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_HOST=db
+      - DB_NAME=${DB_NAME:-cognivers}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MODEL_VERSION_LOCK=${MODEL_VERSION_LOCK:-gpt-4-1106-preview}
+      - PYTHONPATH=/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./api:/app
+    ports:
+      - "8000:8000"
+    networks:
+      - cognivers-net
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.prod
+    env_file: .env
+    environment:
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_HOST=db
+      - DB_NAME=${DB_NAME:-cognivers}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MODEL_VERSION_LOCK=${MODEL_VERSION_LOCK:-gpt-4-1106-preview}
+      - PYTHONPATH=/app
+    volumes:
+      - ./api:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cognivers-net
+    working_dir: /app
+    command: celery --app tasks worker --loglevel=info
+
+  frontend:
+    build: 
+      context: ./cognivers-frontend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "3000:3000"
+    networks:
+      - cognivers-net
+    depends_on:
+      - api
+    environment:
+      - BACKEND_URL=http://api:8000
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  cognivers-net:
+    driver: bridge

@@ -1,0 +1,14 @@
+
+You have full control over the codebase. The codebase is fresh, there is no backward compatibility issues that set us back into cutting corners. backend, frontend apis, and frontend code are all yours and to be released in a future time. Please apply your changes by modifying the components that make the most sense to change, not restricting yourself to a specific tier of the application. I am looking to have the cleanest and most uniform code possible. Therefore please explore the project fully before making any code modifications, in order to replicate the already existing patterns used in the code base. If you ever see signs of lack of uniformity, please let me know with a good description, and we will decide what to do then.
+
+DO NOT do shitty workarounds or fallback scenarios when you are not able to provide a simple straightforward fix for an issue!
+
+If you need to re-start the backend api or run mypy to validate the backend api code, use:
+`docker-compose down && docker-compose up --build api`
+
+
+If you need to re-start the frontend api to see the logs, use:
+`npm run dev -- -p 3001`
+if it complains about port conflicts, it means I am already running this command in the background and you can go ahead and try and kill it first.
+
+to see the logs, make sure to pause and ask me to cause the error. and then you can resume.

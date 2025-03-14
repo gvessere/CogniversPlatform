@@ -1,0 +1,7 @@
+creation_rules:
+  - path_regex: .*\.env$
+    age: "key:" # Replace with actual public key from .sops/keys.txt
+    encrypted_regex: ^(data|api|aws|secret).*$
+  # Exempt self from encryption  
+  - path_regex: .sops\.yaml
+    encrypted_regex: ^(?!.*\.sops\.yaml$).*$
