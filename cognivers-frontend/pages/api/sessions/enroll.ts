@@ -22,7 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Call the backend API to enroll in the session by code
     const data = await callBackendApi(
-      `/sessions/enroll-by-code?session_code=${session_code}`, 
+      `/sessions/enroll?session_code=${session_code}`, 
       'POST', 
       null, 
       token

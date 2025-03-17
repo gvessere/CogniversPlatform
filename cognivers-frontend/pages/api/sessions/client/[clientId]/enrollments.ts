@@ -9,26 +9,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
-  if (req.method !== 'GET') {
-    return res.status(405).json({ message: 'Method not allowed' });
-  }
-
   const { clientId } = req.query;
-  
+
   if (!clientId || Array.isArray(clientId)) {
     return res.status(400).json({ message: 'Invalid client ID' });
   }
 
   try {
-    // Call the backend API to get client enrollments
-    const data = await callBackendApi(
-      `/sessions/client/${clientId}/enrollments`, 
-      'GET', 
-      undefined, 
-      token
-    );
-    
-    return res.status(200).json(data);
+    if (req.method === 'GET') {
+      // Get enrollments for a client
+      const data = await callBackendApi(`/sessions/client/${clientId}/enrollments`, 'GET', null, token);
+      return res.status(200).json(data);
+    } else {
+      return res.status(405).json({ message: 'Method not allowed' });
+    }
   } catch (error: any) {
     console.error('API error:', error.response?.data || error.message);
     return res.status(error.response?.status || 500).json(

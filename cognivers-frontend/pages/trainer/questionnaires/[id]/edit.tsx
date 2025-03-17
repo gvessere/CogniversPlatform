@@ -42,7 +42,7 @@ const EditQuestionnaire = () => {
     setError(null);
     
     try {
-      await updateQuestionnaire(parseInt(id), formData);
+      const response = await updateQuestionnaire(parseInt(id), formData);
       setSuccessMessage('Questionnaire updated successfully');
       
       // Redirect after a short delay

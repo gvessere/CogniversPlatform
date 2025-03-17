@@ -39,6 +39,54 @@ export default async function handler(
         // Handle specific error status codes
         if (error.response) {
           const { status, data } = error.response;
+          
+          // Handle validation errors (422)
+          if (status === 422) {
+            // If it's an array of errors, join them
+            if (Array.isArray(data)) {
+              return res.status(status).json({
+                error: data.map(err => err.msg || err.message || err).join(', ')
+              });
+            }
+            // If it's an object with a detail field that's an array
+            if (data?.detail && Array.isArray(data.detail)) {
+              const errorMessages = data.detail.map((err: { msg?: string; message?: string; loc?: string[] }) => {
+                // If the error has a location field, include it in the message
+                if (err.loc && err.loc.length > 0) {
+                  const field = err.loc[err.loc.length - 1];
+                  return `${field}: ${err.msg || err.message || err}`;
+                }
+                return err.msg || err.message || err;
+              });
+              return res.status(status).json({
+                error: errorMessages.join(', ')
+              });
+            }
+            // If it's an object with a detail field that's a string
+            if (data?.detail && typeof data.detail === 'string') {
+              return res.status(status).json({
+                error: data.detail
+              });
+            }
+            // If it's an object with a message field
+            if (data?.message) {
+              return res.status(status).json({
+                error: data.message
+              });
+            }
+            // If it's an object with an error field
+            if (data?.error) {
+              return res.status(status).json({
+                error: data.error
+              });
+            }
+            // Fallback for other validation errors
+            return res.status(status).json({
+              error: 'The provided data is invalid. Please check your input and try again.'
+            });
+          }
+          
+          // Handle other error status codes
           return res.status(status).json(data);
         }
         

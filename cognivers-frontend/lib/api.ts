@@ -257,6 +257,7 @@ export interface ApiError extends Error {
   endpoint?: string;
   method?: string;
   response?: AxiosResponse;
+  headers?: Record<string, string>;
 }
 
 /**
@@ -289,6 +290,15 @@ function createApiError(error: any, endpoint: string, method: string): ApiError 
     apiError.status = status;
     apiError.data = data;
     apiError.response = error.response; // Preserve the original response object
+    
+    // Copy custom headers that might be needed for error handling
+    apiError.headers = {};
+    if (headers) {
+      // Extract specific headers we're interested in
+      if (headers['x-session-id']) {
+        apiError.headers['x-session-id'] = headers['x-session-id'];
+      }
+    }
   } else if (error.request) {
     // The request was made but no response was received
     apiError = new Error('No response received from server. Please check your connection.') as ApiError;
@@ -712,47 +722,64 @@ export async function deleteData<T>(
  * @param error Error object, potentially an ApiError
  * @throws Error with appropriate message
  */
-function handleApiError(error: any): never {
-  // If it's already an ApiError, we can use its properties directly
-  if (error.isApiError) {
-    const apiError = error as ApiError;
-    
-    if (apiError.status === 401) {
-      throw new Error('Unauthorized: Please log in again');
-    } else if (apiError.status === 403) {
-      throw new Error('Forbidden: You do not have permission to perform this action');
-    } else if (apiError.status === 404) {
-      throw new Error('Not found: The requested resource does not exist');
-    } else if (apiError.status) {
-      // Use the message that was already created in createApiError
-      throw new Error(apiError.message);
-    } else {
-      // Network or other error
-      throw new Error(apiError.message || 'An unknown error occurred');
-    }
-  } else if (error.response) {
-    // Fallback for AxiosError handling (should not happen with our architecture)
-    const status = error.response.status;
-    const data = error.response.data as any;
-    
-    if (status === 401) {
-      throw new Error('Unauthorized: Please log in again');
-    } else if (status === 403) {
-      throw new Error('Forbidden: You do not have permission to perform this action');
-    } else if (status === 404) {
-      throw new Error('Not found: The requested resource does not exist');
-    } else {
-      // Try to get a detailed error message from the response
-      const message = data?.detail || data?.message || 'An error occurred';
-      throw new Error(`Error ${status}: ${message}`);
-    }
-  } else if (error.request) {
-    // The request was made but no response was received
-    throw new Error('No response received from server. Please check your connection.');
-  } else {
-    // Something happened in setting up the request that triggered an Error
-    throw new Error(`Error: ${error.message || 'An unknown error occurred'}`);
+export function handleApiError(error: any, defaultMessage: string = 'An error occurred'): never {
+  console.error('API Error:', error);
+  
+  // Handle both ApiError instances and Axios errors
+  const status = error.status || error.response?.status;
+  const data = error.data || error.response?.data;
+  
+  // Extract session IDs from headers if available
+  const sessionId = error.headers?.['x-session-id'];
+  const interactionBatchId = error.headers?.['x-interaction-batch-id'];
+  
+  // Handle 401 errors specially - they should be handled by AuthContext
+  if (status === 401) {
+    throw new Error('Please log in again to continue.');
   }
+  
+  // Handle 403 errors
+  if (status === 403) {
+    throw new Error('You do not have permission to perform this action.');
+  }
+  
+  // Handle 404 errors
+  if (status === 404) {
+    throw new Error('The requested resource was not found.');
+  }
+  
+  // Handle 422 validation errors
+  if (status === 422) {
+    // If the error has a detail field, use it
+    if (data?.detail) {
+      throw new Error(data.detail);
+    }
+    // If it's an array of errors, join them
+    if (Array.isArray(data)) {
+      throw new Error(data.map(err => err.msg || err.message || err).join(', '));
+    }
+    // If it's an object with a message field
+    if (data?.message) {
+      throw new Error(data.message);
+    }
+    // If it's an object with an error field
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+    // Fallback to a generic validation error message
+    throw new Error('The provided data is invalid. Please check your input and try again.');
+  }
+  
+  // Handle other errors
+  if (data?.message) {
+    throw new Error(data.message);
+  }
+  
+  if (data?.error) {
+    throw new Error(data.error);
+  }
+  
+  throw new Error(defaultMessage);
 }
 
 // ==================== Session API Functions ====================
@@ -835,131 +862,126 @@ export const deleteSession = async (id: number): Promise<void> => {
 // ==================== Questionnaire Instance API Functions ====================
 
 /**
- * Get questionnaire instances for a session
- * @param sessionId Session ID
- * @returns Promise with questionnaire instances array
+ * Gets questionnaires attached to a session
+ * @param sessionId - The ID of the session
+ * @returns An array of questionnaire objects
  */
-export const getQuestionnaireInstances = async (sessionId: number): Promise<QuestionnaireInstance[]> => {
+export async function getQuestionnaireInstances(sessionId: string): Promise<any> {
   try {
-    return await callFrontendApi<QuestionnaireInstance[]>(
+    return await callFrontendApi(
       `/api/sessions/${sessionId}/questionnaires`, 
       'GET', 
       undefined, 
       { resource: 'questionnaires' }
     );
   } catch (error) {
-    console.error(`Error fetching questionnaire instances for session ${sessionId}:`, error);
+    console.error(`Error fetching questionnaires for session ${sessionId}:`, error);
     handleApiError(error);
-    throw error;
+    return [];
   }
-};
+}
 
 /**
- * Create a new questionnaire instance
- * @param instanceData Questionnaire instance data to create
- * @returns Promise with created questionnaire instance
+ * Creates a new questionnaire attached to a session
+ * @param sessionId - The ID of the session
+ * @param data - The questionnaire data
+ * @returns The created questionnaire object
  */
-export const createQuestionnaireInstance = async (
-  sessionId: number, 
-  instanceData: Partial<QuestionnaireInstance>
-): Promise<QuestionnaireInstance> => {
+export async function createQuestionnaireInstance(sessionId: string, data: any): Promise<any> {
   try {
-    return await callFrontendApi<QuestionnaireInstance>(
+    return await callFrontendApi(
       `/api/sessions/${sessionId}/questionnaires`, 
       'POST', 
-      instanceData, 
+      data, 
       { resource: 'questionnaires' }
     );
   } catch (error) {
-    console.error(`Error creating questionnaire instance for session ${sessionId}:`, error);
+    console.error(`Error creating questionnaire for session ${sessionId}:`, error);
     handleApiError(error);
     throw error;
   }
-};
+}
 
 /**
- * Update a questionnaire instance
- * @param id Questionnaire instance ID
- * @param instanceData Questionnaire instance data to update
- * @returns Promise with updated questionnaire instance
+ * Updates a questionnaire attached to a session
+ * @param questionnaireId - The ID of the questionnaire to update
+ * @param data - The updated questionnaire data
+ * @returns The updated questionnaire object
  */
-export const updateQuestionnaireInstance = async (
-  instanceId: number, 
-  instanceData: Partial<QuestionnaireInstance>
-): Promise<QuestionnaireInstance> => {
+export async function updateQuestionnaireInstance(questionnaireId: string, data: any): Promise<any> {
   try {
-    return await callFrontendApi<QuestionnaireInstance>(
-      `/api/sessions/questionnaires/${instanceId}`, 
+    return await callFrontendApi(
+      `/api/sessions/questionnaires/${questionnaireId}`, 
       'PUT', 
-      instanceData, 
+      data, 
       { resource: 'questionnaires' }
     );
   } catch (error) {
-    console.error(`Error updating questionnaire instance ${instanceId}:`, error);
+    console.error(`Error updating questionnaire ${questionnaireId}:`, error);
     handleApiError(error);
     throw error;
   }
-};
+}
 
 /**
- * Delete a questionnaire instance
- * @param id Questionnaire instance ID
- * @returns Promise with success message
+ * Deletes a questionnaire attached to a session
+ * @param questionnaireId - The ID of the questionnaire to delete
+ * @returns Success status
  */
-export const deleteQuestionnaireInstance = async (instanceId: number): Promise<void> => {
+export async function deleteQuestionnaireInstance(questionnaireId: string): Promise<any> {
   try {
-    await callFrontendApi<void>(
-      `/api/sessions/questionnaires/${instanceId}`, 
+    return await callFrontendApi(
+      `/api/sessions/questionnaires/${questionnaireId}`, 
       'DELETE', 
       undefined, 
       { resource: 'questionnaires' }
     );
   } catch (error) {
-    console.error(`Error deleting questionnaire instance ${instanceId}:`, error);
+    console.error(`Error deleting questionnaire ${questionnaireId}:`, error);
     handleApiError(error);
     throw error;
   }
-};
+}
 
 /**
- * Activate a questionnaire instance
- * @param id Questionnaire instance ID
- * @returns Promise with updated questionnaire instance
+ * Activates a questionnaire attached to a session
+ * @param questionnaireId - The ID of the questionnaire to activate
+ * @returns Success status
  */
-export const activateQuestionnaireInstance = async (instanceId: number): Promise<QuestionnaireInstance> => {
+export async function activateQuestionnaireInstance(questionnaireId: string): Promise<any> {
   try {
-    return await callFrontendApi<QuestionnaireInstance>(
-      `/api/sessions/questionnaires/actions/activate?sessionId=${instanceId}`, 
+    return await callFrontendApi(
+      `/api/sessions/questionnaires/actions/activate?questionnaireId=${questionnaireId}`, 
       'POST', 
       undefined, 
       { resource: 'questionnaires' }
     );
   } catch (error) {
-    console.error(`Error activating questionnaire instance ${instanceId}:`, error);
+    console.error(`Error activating questionnaire ${questionnaireId}:`, error);
     handleApiError(error);
     throw error;
   }
-};
+}
 
 /**
- * Deactivate a questionnaire instance
- * @param id Questionnaire instance ID
- * @returns Promise with updated questionnaire instance
+ * Deactivates a questionnaire attached to a session
+ * @param questionnaireId - The ID of the questionnaire to deactivate
+ * @returns Success status
  */
-export const deactivateQuestionnaireInstance = async (instanceId: number): Promise<QuestionnaireInstance> => {
+export async function deactivateQuestionnaireInstance(questionnaireId: string): Promise<any> {
   try {
-    return await callFrontendApi<QuestionnaireInstance>(
-      `/api/sessions/questionnaires/actions/deactivate?sessionId=${instanceId}`, 
+    return await callFrontendApi(
+      `/api/sessions/questionnaires/actions/deactivate?questionnaireId=${questionnaireId}`, 
       'POST', 
       undefined, 
       { resource: 'questionnaires' }
     );
   } catch (error) {
-    console.error(`Error deactivating questionnaire instance ${instanceId}:`, error);
+    console.error(`Error deactivating questionnaire ${questionnaireId}:`, error);
     handleApiError(error);
     throw error;
   }
-};
+}
 
 /**
  * Check if a questionnaire is attached to any sessions
@@ -1006,15 +1028,12 @@ export const getTrainers = async (): Promise<User[]> => {
  */
 export const getQuestionnaire = async (id: number): Promise<any> => {
   try {
-    return await callFrontendApi(
-      `/api/questionnaires/${id}`,
-      'GET',
-      null,
-      { resource: 'questionnaires' }
-    );
+    return await getData(`/api/questionnaires/${id}`);
   } catch (error) {
-    console.error(`Error fetching questionnaire ${id}:`, error);
-    handleApiError(error);
+    // Log the error for debugging
+    console.error(`Error getting questionnaire ${id}:`, error);
+    
+    // Re-throw the error to be handled by the calling code
     throw error;
   }
 };
@@ -1030,12 +1049,13 @@ export const updateQuestionnaire = async (
   questionnaireData: any
 ): Promise<any> => {
   try {
-    return await callFrontendApi(
+    const response = await callFrontendApi(
       `/api/questionnaires/${id}/update`,
       'PATCH',
       questionnaireData,
       { resource: 'questionnaires' }
     );
+    return response;
   } catch (error) {
     console.error(`Error updating questionnaire ${id}:`, error);
     handleApiError(error);
@@ -1056,18 +1076,7 @@ export async function getSessionEnrollments(sessionId: number): Promise<ClientSe
 }
 
 export async function getClientEnrollments(clientId: number): Promise<ClientSessionEnrollment[]> {
-  try {
-    return await callFrontendApi<ClientSessionEnrollment[]>(
-      `/api/sessions/client/${clientId}/enrollments`, 
-      'GET', 
-      undefined, 
-      { resource: 'sessions' }
-    );
-  } catch (error) {
-    console.error(`Error getting client enrollments for client ${clientId}:`, error);
-    handleApiError(error);
-    throw error;
-  }
+  return getData(`/api/sessions/client/${clientId}/enrollments`);
 }
 
 /**
@@ -1126,6 +1135,87 @@ export const getAvailableSessions = async (): Promise<Session[]> => {
     console.error('Error getting available sessions:', error);
     handleApiError(error);
     throw error;
+  }
+};
+
+/**
+ * Delete a questionnaire
+ * @param id Questionnaire ID
+ * @returns Promise with success message
+ */
+export const deleteQuestionnaire = async (id: number): Promise<any> => {
+  try {
+    return await callFrontendApi<any>(
+      `/api/questionnaires/${id}`,
+      'DELETE',
+      undefined,
+      { resource: 'questionnaires' }
+    );
+  } catch (error) {
+    console.error(`Error deleting questionnaire ${id}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Clone a questionnaire
+ * @param id Questionnaire ID to clone
+ * @returns Promise with the ID of the cloned questionnaire
+ */
+export const cloneQuestionnaire = async (id: number): Promise<any> => {
+  try {
+    return await callFrontendApi<any>(
+      `/api/questionnaires/${id}/clone`,
+      'POST',
+      undefined,
+      { resource: 'questionnaires' }
+    );
+  } catch (error) {
+    console.error(`Error cloning questionnaire ${id}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Get sessions associated with a questionnaire
+ * @param id Questionnaire ID
+ * @returns Promise with sessions data
+ */
+export const getQuestionnaireSessions = async (id: number): Promise<any> => {
+  try {
+    return await callFrontendApi<any>(
+      `/api/questionnaires/${id}/sessions`,
+      'GET',
+      undefined,
+      { resource: 'questionnaires' }
+    );
+  } catch (error) {
+    console.error(`Error fetching sessions for questionnaire ${id}:`, error);
+    throw error;
+  }
+};
+
+export const getQuestionnaireAttempts = async (id: number): Promise<any> => {
+  try {
+    return await getData(`/api/questionnaires/${id}/attempts`);
+  } catch (error) {
+    // Log the error for debugging
+    console.error(`Error getting questionnaire attempts for ${id}:`, error);
+    
+    // Re-throw the error to be handled by the calling code
+    throw error;
+  }
+};
+
+export const getQuestionnaireResponses = async (questionnaireId: number, responseId: number): Promise<any> => {
+  try {
+    return await getData(`/api/questionnaires/${questionnaireId}/responses/${responseId}`);
+  } catch (error) {
+    // Log the error for debugging
+    console.error(`Error getting questionnaire responses for ${questionnaireId}/${responseId}:`, error);
+    
+    // Use handleApiError for consistent error handling
+    handleApiError(error);
   }
 };
 

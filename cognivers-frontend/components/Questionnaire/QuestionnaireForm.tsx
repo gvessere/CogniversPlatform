@@ -20,7 +20,11 @@ import {
   Tooltip,
   Alert,
   Snackbar,
-  SelectChangeEvent
+  SelectChangeEvent,
+  Checkbox,
+  ListItemText,
+  OutlinedInput,
+  CircularProgress
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -28,6 +32,7 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { useRouter } from 'next/router';
 import { formatErrorMessage } from '../../utils/errorUtils';
+import { getSessions } from '../../lib/api';
 
 // Types should match backend models
 export interface QuestionFormData {
@@ -46,12 +51,15 @@ export interface QuestionFormData {
 }
 
 export interface QuestionnaireFormData {
+  id?: number;
   title: string;
   description: string;
   type: string;
   is_paginated: boolean;
   requires_completion: boolean;
+  number_of_attempts: number;
   questions: QuestionFormData[];
+  sessions?: number[];
 }
 
 interface QuestionnaireFormProps {
@@ -82,7 +90,9 @@ export const initialFormState: QuestionnaireFormData = {
   type: 'signup',
   is_paginated: false,
   requires_completion: true,
-  questions: [{ ...initialQuestionState }]
+  number_of_attempts: 10,
+  questions: [{ ...initialQuestionState }],
+  sessions: []
 };
 
 const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({
@@ -98,13 +108,35 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({
     initialData || initialFormState
   );
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [sessions, setSessions] = useState<{ id: number; title: string }[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  // Fetch available sessions when component mounts
+  useEffect(() => {
+    const fetchSessions = async () => {
+      try {
+        setSessionsLoading(true);
+        const sessionsData = await getSessions();
+        setSessions(sessionsData);
+      } catch (error) {
+        console.error('Error fetching sessions:', error);
+        setError('Failed to load available sessions');
+      } finally {
+        setSessionsLoading(false);
+      }
+    };
+
+    fetchSessions();
+  }, []);
 
   // Handle form field changes for text inputs, switches, etc.
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, checked, type } = e.target;
     setFormState({
       ...formState,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: type === 'checkbox' ? checked : 
+              type === 'number' ? Number(value) : 
+              value
     });
   };
 
@@ -248,6 +280,15 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({
     setFormState({
       ...formState,
       questions: updatedQuestions
+    });
+  };
+
+  // Add handler for session selection
+  const handleSessionChange = (event: SelectChangeEvent<number[]>) => {
+    const { value } = event.target;
+    setFormState({
+      ...formState,
+      sessions: typeof value === 'string' ? [parseInt(value)] : value as number[]
     });
   };
 
@@ -592,7 +633,52 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({
                   }
                   label="Require completion of all required questions"
                 />
+                <TextField
+                  fullWidth
+                  label="Number of Attempts"
+                  name="number_of_attempts"
+                  type="number"
+                  value={formState.number_of_attempts}
+                  onChange={handleInputChange}
+                  inputProps={{ min: 1 }}
+                  error={!!validationErrors.number_of_attempts}
+                  helperText={validationErrors.number_of_attempts}
+                />
               </Box>
+            </Grid>
+
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel id="sessions-label">Associate with Sessions</InputLabel>
+                <Select
+                  labelId="sessions-label"
+                  multiple
+                  value={formState.sessions || []}
+                  onChange={handleSessionChange}
+                  input={<OutlinedInput label="Associate with Sessions" />}
+                  renderValue={(selected) => {
+                    const selectedTitles = sessions
+                      .filter(session => selected.includes(session.id))
+                      .map(session => session.title);
+                    return selectedTitles.join(', ');
+                  }}
+                  startAdornment={
+                    sessionsLoading ? (
+                      <CircularProgress size={20} sx={{ mr: 1 }} />
+                    ) : null
+                  }
+                >
+                  {sessions.map((session) => (
+                    <MenuItem key={session.id} value={session.id}>
+                      <Checkbox checked={(formState.sessions || []).includes(session.id)} />
+                      <ListItemText primary={session.title} />
+                    </MenuItem>
+                  ))}
+                </Select>
+                <FormHelperText>
+                  Select sessions to associate this questionnaire with
+                </FormHelperText>
+              </FormControl>
             </Grid>
           </Grid>
           

@@ -9,24 +9,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
-  const { sessionId } = req.query;
+  const { questionnaireId } = req.query;
 
-  if (!sessionId || Array.isArray(sessionId)) {
+  if (!questionnaireId || Array.isArray(questionnaireId)) {
     return res.status(400).json({ message: 'Invalid questionnaire ID' });
   }
 
   try {
     if (req.method === 'GET') {
-      // Get a specific questionnaire instance
-      const data = await callBackendApi(`/sessions/instances/${sessionId}`, 'GET', null, token);
+      // Get a specific questionnaire attached to a session
+      const data = await callBackendApi(`/sessions/questionnaires/${questionnaireId}`, 'GET', null, token);
       return res.status(200).json(data);
     } else if (req.method === 'PUT') {
-      // Update questionnaire instance
-      const data = await callBackendApi(`/sessions/instances/${sessionId}`, 'PUT', req.body, token);
+      // Update a questionnaire attached to a session
+      const data = await callBackendApi(`/sessions/questionnaires/${questionnaireId}`, 'PUT', req.body, token);
       return res.status(200).json(data);
     } else if (req.method === 'DELETE') {
-      // Delete questionnaire instance
-      const data = await callBackendApi(`/sessions/instances/${sessionId}`, 'DELETE', null, token);
+      // Detach a questionnaire from a session
+      const data = await callBackendApi(`/sessions/questionnaires/${questionnaireId}`, 'DELETE', null, token);
       return res.status(200).json(data);
     } else {
       return res.status(405).json({ message: 'Method not allowed' });

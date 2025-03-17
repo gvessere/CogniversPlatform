@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select, and_
+from sqlalchemy.orm import selectinload
 from typing import List, Optional, Any, TypeVar, Generic
 from datetime import datetime
 from sqlalchemy.orm.query import Query
@@ -71,6 +72,22 @@ async def is_questionnaire_attached_to_sessions(questionnaire_id: int, db: Async
     result = await db.execute(query)
     instances = result.scalars().all()
     return len(instances) > 0
+
+# Helper function to check if a client is enrolled in a session
+async def is_client_enrolled_in_session(client_id: Optional[int], session_id: int, db: AsyncSession) -> bool:
+    """Check if a client is enrolled in a specific session"""
+    if client_id is None:
+        return False
+        
+    query: Any = select(ClientSessionEnrollment).where(
+        and_(
+            ClientSessionEnrollment.client_id == client_id,
+            ClientSessionEnrollment.session_id == session_id
+        )
+    )
+    result = await db.execute(query)
+    enrollment = result.scalar_one_or_none()
+    return enrollment is not None
 
 # ==================== Session Routes ====================
 
@@ -304,24 +321,48 @@ async def delete_session(
     
     return MessageResponse(message=f"Session with ID {session_id} deleted successfully")
 
-# ==================== Questionnaire Instance Routes ====================
+# ==================== Questionnaire Instance Base Functions ====================
 
-@router.post("/instances", response_model=QuestionnaireInstanceResponse, status_code=status.HTTP_201_CREATED)
+async def get_questionnaire_instances(
+    session_id: int,
+    current_user: User,
+    db: AsyncSession
+) -> List[QuestionnaireInstanceResponse]:
+    """Get all questionnaires attached to a session"""
+    session = await get_session_by_id(session_id, db)
+    
+    if not is_trainer_or_admin(current_user) and not await is_client_enrolled_in_session(current_user.id, session_id, db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: User is not associated with this session"
+        )
+    
+    query = select(QuestionnaireInstance).where(
+        QuestionnaireInstance.session_id == session_id
+    ).options(
+        selectinload(QuestionnaireInstance.questionnaire)
+    )
+    
+    result = await db.execute(query)
+    instances = result.scalars().all()
+    
+    return [QuestionnaireInstanceResponse.model_validate(instance) for instance in instances]
+
 async def create_questionnaire_instance(
     instance_data: QuestionnaireInstanceCreate,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_session)
-):
+    current_user: User,
+    db: AsyncSession
+) -> QuestionnaireInstanceResponse:
+    """Create a new questionnaire instance attached to a session"""
     if not is_trainer_or_admin(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers and admins can create questionnaire instances"
+            detail="Only trainers and admins can attach questionnaires to sessions"
         )
     
-    # Validate session exists
     session = await get_session_by_id(instance_data.session_id, db)
     
-    # Validate questionnaire exists
+    # Check if the questionnaire exists
     questionnaire = await db.get(Questionnaire, instance_data.questionnaire_id)
     if not questionnaire:
         raise HTTPException(
@@ -329,204 +370,213 @@ async def create_questionnaire_instance(
             detail=f"Questionnaire with ID {instance_data.questionnaire_id} not found"
         )
     
-    # Create instance
-    new_instance = QuestionnaireInstance(**instance_data.model_dump())
+    # Create the questionnaire instance
+    new_instance = QuestionnaireInstance(
+        session_id=instance_data.session_id,
+        questionnaire_id=instance_data.questionnaire_id,
+        is_active=instance_data.is_active,
+        created_by=current_user.id,
+        updated_by=current_user.id
+    )
     
     db.add(new_instance)
     await db.commit()
+    await db.refresh(new_instance)
     
-    # Add questionnaire title to response without querying again
-    response_data = QuestionnaireInstanceResponse(
-        **new_instance.model_dump(),
-        questionnaire_title=questionnaire.title
-    )
+    # Load the related questionnaire
+    await db.refresh(new_instance, ["questionnaire"])
     
-    return response_data
+    return QuestionnaireInstanceResponse.model_validate(new_instance)
 
-@router.get("/instances/{session_id}", response_model=List[QuestionnaireInstanceResponse])
-async def get_questionnaire_instances(
-    session_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_session)
-):
-    if not is_trainer_or_admin(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers and admins can view questionnaire instances"
-        )
-    
-    # Validate session exists
-    await get_session_by_id(session_id, db)
-    
-    # Get instances for session
-    query: Any = select(QuestionnaireInstance).where(
-        QuestionnaireInstance.session_id == session_id
-    )
-    result = await db.execute(query)
-    instances = result.scalars().all()
-    
-    # Add questionnaire titles to responses
-    response_data = []
-    for instance in instances:
-        questionnaire = await db.get(Questionnaire, instance.questionnaire_id)
-        questionnaire_title = questionnaire.title if questionnaire else None
-        
-        response_data.append(
-            QuestionnaireInstanceResponse(
-                **instance.model_dump(),
-                questionnaire_title=questionnaire_title
-            )
-        )
-    
-    return response_data
-
-@router.put("/instances/{instance_id}", response_model=QuestionnaireInstanceResponse)
 async def update_questionnaire_instance(
     instance_id: int,
     instance_data: QuestionnaireInstanceUpdate,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_session)
-):
+    current_user: User,
+    db: AsyncSession
+) -> QuestionnaireInstanceResponse:
+    """Update a questionnaire instance"""
     if not is_trainer_or_admin(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers and admins can update questionnaire instances"
+            detail="Only trainers and admins can update questionnaires attached to sessions"
         )
     
-    instance = await get_questionnaire_instance_by_id(instance_id, db)
+    # Get the instance
+    instance = await db.get(QuestionnaireInstance, instance_id)
+    if not instance:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Questionnaire instance with ID {instance_id} not found"
+        )
     
-    # Update fields if provided
-    update_data = instance_data.model_dump(exclude_unset=True)
-    
-    for key, value in update_data.items():
+    # Apply updates
+    for key, value in instance_data.model_dump(exclude_unset=True).items():
         setattr(instance, key, value)
     
+    instance.updated_by = current_user.id
     instance.updated_at = datetime.now()
     
-    db.add(instance)
     await db.commit()
+    await db.refresh(instance)
     
-    # Add questionnaire title to response without querying again
-    questionnaire = await db.get(Questionnaire, instance.questionnaire_id)
-    questionnaire_title = questionnaire.title if questionnaire else None
+    # Load the related questionnaire
+    await db.refresh(instance, ["questionnaire"])
     
-    response_data = QuestionnaireInstanceResponse(
-        **instance.model_dump(),
-        questionnaire_title=questionnaire_title
-    )
+    return QuestionnaireInstanceResponse.model_validate(instance)
     
-    return response_data
-
-@router.delete("/instances/{instance_id}", response_model=MessageResponse)
 async def delete_questionnaire_instance(
     instance_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_session)
-):
+    current_user: User,
+    db: AsyncSession
+) -> MessageResponse:
+    """Delete a questionnaire instance"""
     if not is_trainer_or_admin(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers and admins can delete questionnaire instances"
+            detail="Only trainers and admins can delete questionnaires attached to sessions"
         )
     
-    instance = await get_questionnaire_instance_by_id(instance_id, db)
+    # Get the instance
+    instance = await db.get(QuestionnaireInstance, instance_id)
+    if not instance:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Questionnaire instance with ID {instance_id} not found"
+        )
     
     await db.delete(instance)
     await db.commit()
     
     return MessageResponse(message=f"Questionnaire instance with ID {instance_id} deleted successfully")
 
-# Route to check if a questionnaire is attached to any sessions
-@router.get("/questionnaire/{questionnaire_id}/is-attached", response_model=dict)
-async def check_questionnaire_attachment(
+async def activate_questionnaire_instance(
+    instance_id: int,
+    current_user: User,
+    db: AsyncSession
+) -> QuestionnaireInstanceResponse:
+    """Activate a questionnaire instance"""
+    if not is_trainer_or_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only trainers and admins can activate questionnaires"
+        )
+    
+    # Get the instance
+    instance = await db.get(QuestionnaireInstance, instance_id)
+    if not instance:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Questionnaire instance with ID {instance_id} not found"
+        )
+    
+    instance.is_active = True
+    instance.updated_by = current_user.id
+    instance.updated_at = datetime.now()
+    
+    await db.commit()
+    await db.refresh(instance)
+    
+    # Load the related questionnaire
+    await db.refresh(instance, ["questionnaire"])
+    
+    return QuestionnaireInstanceResponse.model_validate(instance)
+
+async def deactivate_questionnaire_instance(
+    instance_id: int,
+    current_user: User,
+    db: AsyncSession
+) -> QuestionnaireInstanceResponse:
+    """Deactivate a questionnaire instance"""
+    if not is_trainer_or_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only trainers and admins can deactivate questionnaires"
+        )
+    
+    # Get the instance
+    instance = await db.get(QuestionnaireInstance, instance_id)
+    if not instance:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Questionnaire instance with ID {instance_id} not found"
+        )
+    
+    instance.is_active = False
+    instance.updated_by = current_user.id
+    instance.updated_at = datetime.now()
+    
+    await db.commit()
+    await db.refresh(instance)
+    
+    # Load the related questionnaire
+    await db.refresh(instance, ["questionnaire"])
+    
+    return QuestionnaireInstanceResponse.model_validate(instance)
+
+# ==================== Questionnaire Instance Routes (RESTful API) ====================
+
+# Session questionnaire collection endpoints
+@router.get("/{session_id}/questionnaires", response_model=List[QuestionnaireInstanceResponse])
+async def get_session_questionnaires(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Get all questionnaires for a specific session"""
+    return await get_questionnaire_instances(session_id, current_user, db)
+
+@router.post("/{session_id}/questionnaires", response_model=QuestionnaireInstanceResponse, status_code=status.HTTP_201_CREATED)
+async def add_questionnaire_to_session(
+    session_id: int,
+    instance_data: QuestionnaireInstanceCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Add a questionnaire to a session"""
+    # Ensure session_id in path matches the one in the request body
+    instance_data_with_session = QuestionnaireInstanceCreate(
+        **instance_data.model_dump(),
+        session_id=session_id
+    )
+    return await create_questionnaire_instance(instance_data_with_session, current_user, db)
+
+# Individual questionnaire endpoints
+@router.get("/questionnaires/{questionnaire_id}", response_model=QuestionnaireInstanceResponse)
+async def get_questionnaire(
     questionnaire_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
+    """Get a specific questionnaire"""
+    instance = await get_questionnaire_instance_by_id(questionnaire_id, db)
     if not is_trainer_or_admin(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers and admins can check questionnaire attachment"
-        )
+        # Check if client is enrolled in the session this questionnaire belongs to
+        if not await is_client_enrolled_in_session(current_user.id, instance.session_id, db):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: User is not associated with this questionnaire's session"
+            )
     
-    # Validate questionnaire exists
-    questionnaire = await db.get(Questionnaire, questionnaire_id)
-    if not questionnaire:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Questionnaire with ID {questionnaire_id} not found"
-        )
-    
-    is_attached = await is_questionnaire_attached_to_sessions(questionnaire_id, db)
-    
-    return {
-        "questionnaire_id": questionnaire_id,
-        "is_attached": is_attached
-    }
+    return QuestionnaireInstanceResponse.model_validate(instance)
 
-# Route to activate a questionnaire instance
-@router.post("/instances/{instance_id}/activate", response_model=QuestionnaireInstanceResponse)
-async def activate_questionnaire_instance(
-    instance_id: int,
+@router.put("/questionnaires/{questionnaire_id}", response_model=QuestionnaireInstanceResponse)
+async def update_questionnaire(
+    questionnaire_id: int,
+    instance_data: QuestionnaireInstanceUpdate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
-    if not is_trainer_or_admin(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers and admins can activate questionnaire instances"
-        )
-    
-    instance = await get_questionnaire_instance_by_id(instance_id, db)
-    
-    instance.is_active = True
-    instance.updated_at = datetime.now()
-    
-    db.add(instance)
-    await db.commit()
-    
-    # Add questionnaire title to response without querying again
-    questionnaire = await db.get(Questionnaire, instance.questionnaire_id)
-    questionnaire_title = questionnaire.title if questionnaire else None
-    
-    response_data = QuestionnaireInstanceResponse(
-        **instance.model_dump(),
-        questionnaire_title=questionnaire_title
-    )
-    
-    return response_data
+    """Update a specific questionnaire"""
+    return await update_questionnaire_instance(questionnaire_id, instance_data, current_user, db)
 
-# Route to deactivate a questionnaire instance
-@router.post("/instances/{instance_id}/deactivate", response_model=QuestionnaireInstanceResponse)
-async def deactivate_questionnaire_instance(
-    instance_id: int,
+@router.delete("/questionnaires/{questionnaire_id}", response_model=MessageResponse)
+async def delete_questionnaire(
+    questionnaire_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
-    if not is_trainer_or_admin(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers and admins can deactivate questionnaire instances"
-        )
-    
-    instance = await get_questionnaire_instance_by_id(instance_id, db)
-    
-    instance.is_active = False
-    instance.updated_at = datetime.now()
-    
-    db.add(instance)
-    await db.commit()
-    
-    # Add questionnaire title to response without querying again
-    questionnaire = await db.get(Questionnaire, instance.questionnaire_id)
-    questionnaire_title = questionnaire.title if questionnaire else None
-    
-    response_data = QuestionnaireInstanceResponse(
-        **instance.model_dump(),
-        questionnaire_title=questionnaire_title
-    )
-    
-    return response_data
+    """Delete a specific questionnaire"""
+    return await delete_questionnaire_instance(questionnaire_id, current_user, db)
 
 # ==================== Client Session Enrollment Routes ====================
 
@@ -712,7 +762,7 @@ async def generate_new_session_code(
     return response_data
 
 # Route for clients to enroll in a session using a session code
-@router.post("/enroll-by-code", response_model=ClientSessionEnrollmentResponse)
+@router.post("/enroll", response_model=ClientSessionEnrollmentResponse)
 async def enroll_in_session_by_code(
     session_code: str,
     current_user: User = Depends(get_current_user),
@@ -745,7 +795,8 @@ async def enroll_in_session_by_code(
     if existing_enrollment:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You are already enrolled in this session"
+            detail="You are already enrolled in this session",
+            headers={"X-Session-Id": str(session.id)}
         )
     
     # Create enrollment
@@ -800,7 +851,8 @@ async def enroll_in_public_session(
     if existing_enrollment:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You are already enrolled in this session"
+            detail="You are already enrolled in this session",
+            headers={"X-Session-Id": str(session_id)}
         )
     
     # Create enrollment

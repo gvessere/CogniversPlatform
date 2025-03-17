@@ -46,59 +46,40 @@ export default async function handler(
     // Get token from cookies
     const token = req.cookies.token;
     if (!token) {
-        return res.status(401).json({ error: 'Not authenticated' });
+        return res.status(401).json({ 
+            error: 'Not authenticated',
+            detail: 'No authentication token found'
+        });
     }
 
     try {
-        // Remove the cache-busting parameter from the request
+        // Try to get user data from the backend API
+        const response = await callBackendApi(`/users/me`, 'GET', null, token);
         
-        // Try to get fresh user data from the backend API
-        try {
-            // Get user data directly from /users/me endpoint
-            const response = await callBackendApi(`/users/me`, 'GET', null, token);
-            
-            if (response && response.id) {
-                // Normalize role to match enum
-                if (response.role) {
-                    response.role = normalizeRole(response.role);
-                }
-                
-                return res.status(200).json(response);
+        if (response && response.id) {
+            // Normalize role to match enum
+            if (response.role) {
+                response.role = normalizeRole(response.role);
             }
-        } catch (getError) {
-            console.log('Failed to get user data via GET, trying alternative methods:', getError);
-        }
-        
-        // If GET fails, try PATCH as a fallback
-        try {
-            // Send an empty PATCH request to see if it returns user data
-            const response = await callBackendApi('/users/me', 'PATCH', {}, token);
             
-            // If we get here, the request succeeded
-            if (response && (response.id || response.email)) {
-                const userData: UserData = response;
-                
-                // Normalize role to match enum
-                if (userData && userData.role) {
-                    userData.role = normalizeRole(userData.role);
-                }
-                
-                return res.status(200).json(userData);
-            }
-        } catch (patchError) {
-            console.log('Failed to get user data via PATCH:', patchError);
+            return res.status(200).json(response);
+        } else {
+            throw new Error('Invalid user data received from backend');
         }
-        
-        // If both API methods fail, return an authentication error
-        return res.status(401).json({ 
-            error: 'Unable to retrieve user data from backend API',
-            detail: 'Authentication may have expired. Please try logging in again.'
-        });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error in /api/auth/me:', error);
-        // Return appropriate error
+        
+        // Handle specific error cases
+        if (error.response?.status === 401 || error.response?.status === 403) {
+            return res.status(401).json({ 
+                error: 'Authentication failed',
+                detail: 'Your session has expired. Please log in again.'
+            });
+        }
+        
         return res.status(500).json({
-            error: 'Failed to process user data'
+            error: 'Internal server error',
+            detail: 'Failed to retrieve user data'
         });
     }
 } 

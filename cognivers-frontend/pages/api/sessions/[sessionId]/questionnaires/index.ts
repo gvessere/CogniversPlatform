@@ -17,13 +17,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     if (req.method === 'GET') {
-      // Get questionnaire instances for a session
-      const data = await callBackendApi(`/sessions/${sessionId}/instances`, 'GET', null, token);
+      // Get all questionnaires attached to a session
+      const data = await callBackendApi(`/sessions/${sessionId}/questionnaires`, 'GET', null, token);
       return res.status(200).json(data);
     } else if (req.method === 'POST') {
-      // Create a questionnaire instance for a session
-      const data = await callBackendApi(`/sessions/${sessionId}/instances`, 'POST', req.body, token);
-      return res.status(201).json(data);
+      // Attach a questionnaire to a session
+      const data = await callBackendApi(`/sessions/${sessionId}/questionnaires`, 'POST', req.body, token);
+      return res.status(200).json(data);
     } else {
       return res.status(405).json({ message: 'Method not allowed' });
     }

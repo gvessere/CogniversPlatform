@@ -54,13 +54,13 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
         
         // Clear local state regardless of API success
         setUser(null)
+        Cookies.remove('token') // Ensure token cookie is removed
         
         // Use setTimeout to ensure state update completes before navigation
         setTimeout(() => {
             router.push('/login')
         }, 0)
     }, [router])
-
 
     useEffect(() => {
       let isMounted = true // Track component mount state
@@ -70,16 +70,9 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
           
           // Helper function to detect if there might be a session
           const mightHaveSession = (): boolean => {
-              // Check if we have any authentication related cookies
-              // This avoids unnecessary API calls on public pages when clearly not logged in
-              const cookies = document.cookie;
-              const hasAuthCookie = cookies.includes('token=') || 
-                                   cookies.includes('session=') || 
-                                   cookies.includes('auth=');
+              const token = Cookies.get('token')
               const hasLocalStorageSession = localStorage.getItem('hasSession') === 'true';
-              
-              // Only return true if we have actual evidence of a session
-              return hasAuthCookie || hasLocalStorageSession;
+              return !!token || hasLocalStorageSession;
           };
           
           // Force auth state reset when landing on login page
@@ -88,20 +81,17 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
                   setUser(null);
                   setLoading(false);
               }
-              // Only proceed with API call if we have reason to believe there's a valid session
-              // This helps avoid unnecessary API calls on the login page
-              if (!mightHaveSession()) {
-                  return;
-              }
+              return;
           }
           
-          console.log('AuthContext - Checking authentication state');
-          
-          // Skip auth check for public pages if there's no evidence of a session
-          if (isPublicPage && !mightHaveSession()) {
-              console.log('AuthContext - On public page with no session evidence, skipping auth check');
-              setUser(null);
-              setLoading(false);
+          // If no session evidence and not on a public page, redirect to login
+          if (!isPublicPage && !mightHaveSession()) {
+              console.log('No session evidence found, redirecting to login');
+              if (isMounted) {
+                  setUser(null);
+                  setLoading(false);
+              }
+              router.push('/login');
               return;
           }
           
@@ -109,50 +99,38 @@ export function AuthProvider({ children }: AuthProviderProps): React.ReactElemen
               console.log('AuthContext - Loading user data');
               const userData = await callFrontendApi<User>('/api/auth/me', 'GET', undefined, { isPublicPage });
               
-              // Check if this is a special 401 error response for public pages
-              if (userData && (userData as any).__isExpected401Error) {
-                  console.log('AuthContext - Expected 401 on public page, setting user to null');
-                  if (isMounted) {
-                      setUser(null);
-                      localStorage.removeItem('hasSession');
-                  }
-              } else {
+              if (userData) {
                   console.log('AuthContext - User data loaded:', userData)
                   if (isMounted) {
-                    setUser(userData)
-                    // Mark as validated when we successfully load user data
-                    lastValidatedRef.current = Date.now()
-                    // Set flag in localStorage to indicate we have a session
-                    localStorage.setItem('hasSession', 'true');
+                      setUser(userData)
+                      lastValidatedRef.current = Date.now()
+                      localStorage.setItem('hasSession', 'true');
                   }
               }
           } catch (error: any) {
-              // Don't log as error for 401 unauthorized on public pages
-              if (error.response?.status === 401 && isPublicPage) {
-                  console.log('AuthContext - Not authenticated on public page');
-                  // Silently handle 401 errors on public pages
+              console.error('Failed to load user data:', error);
+              
+              if (error.response?.status === 401 || error.response?.status === 403) {
+                  // Clear session data
                   localStorage.removeItem('hasSession');
-              } else if (error.response?.status === 401) {
-                  console.log('AuthContext - Authentication required');
-                  // Clear session indicator
-                  localStorage.removeItem('hasSession');
+                  Cookies.remove('token');
                   
-                  // If not on a public page, redirect to login
-                  if (!isPublicPage && router.pathname !== '/login') {
+                  if (isMounted) {
+                      setUser(null);
+                  }
+                  
+                  // Redirect to login if not on a public page
+                  if (!isPublicPage) {
                       router.push('/login');
                   }
-              } else {
-                  console.error('Failed to load user data:', error);
               }
-              
-              if (isMounted) setUser(null)
           } finally {
               if (isMounted) setLoading(false)
           }
-        }
-        loadUser()
-        return () => { isMounted = false } // Cleanup on unmount
-    }, [router.pathname]) // Re-run on route changes to update auth state
+      }
+      loadUser()
+      return () => { isMounted = false } // Cleanup on unmount
+    }, [router]) // Re-run on route changes to update auth state
   
     useEffect(() => {
       // Only validate session if user is logged in

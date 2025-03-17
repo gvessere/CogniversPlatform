@@ -24,7 +24,7 @@ import { useRouter } from 'next/router';
 import { format } from 'date-fns';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import InfoIcon from '@mui/icons-material/Info';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth } from '../../context/AuthContext';
 import { 
   enroll,
   getClientEnrollments 
@@ -47,13 +47,16 @@ export default function ClientSessionsPage() {
   // Fetch enrolled sessions
   useEffect(() => {
     const fetchData = async () => {
+      console.log('Fetching enrolled sessions, user:', user);
       setLoading(true);
       try {
         if (user) {
-          console.log('Fetching enrollments for user:', user.id);
+          console.log('Making API call to get enrollments for user ID:', user.id);
           const enrolledData = await getClientEnrollments(user.id);
-          console.log('Received enrollment data:', enrolledData);
+          console.log('Received enrolled sessions data:', enrolledData);
           setEnrolledSessions(enrolledData);
+        } else {
+          console.log('No user data available, skipping API call');
         }
       } catch (err) {
         console.error('Error fetching sessions:', err);
@@ -91,23 +94,21 @@ export default function ClientSessionsPage() {
     } catch (err: any) {
       console.error('Error enrolling in session:', err);
       
-      // Special handling for "already enrolled" error
-      if (err.message?.includes('already enrolled')) {
-        // Treat as success with a different message
+      // Handle "already enrolled" case as a success rather than an error
+      if (err.message && err.message.includes('already enrolled')) {
         setSuccess('You are already enrolled in this session!');
         setSessionCode('');
         
-        // Still refresh enrollments to ensure they're up to date
+        // Refresh enrolled sessions
         if (user) {
-          try {
-            const enrolledData = await getClientEnrollments(user.id);
-            setEnrolledSessions(enrolledData);
-          } catch (refreshErr) {
-            console.error('Error refreshing enrollments:', refreshErr);
-          }
+          const enrolledData = await getClientEnrollments(user.id);
+          setEnrolledSessions(enrolledData);
         }
+        
+        // Switch to the enrolled sessions tab
+        setTabValue(0);
       } else {
-        // Handle other errors as usual
+        // For other errors, show the error message
         setError(err.message || 'Invalid session code. Please try again.');
       }
     } finally {

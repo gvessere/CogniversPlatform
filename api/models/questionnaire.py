@@ -52,6 +52,7 @@ class Questionnaire(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.now)
     is_paginated: bool = Field(default=False)
     requires_completion: bool = Field(default=True)
+    number_of_attempts: int
     created_by_id: int = Field(foreign_key="user.id")
     
     # Relationships

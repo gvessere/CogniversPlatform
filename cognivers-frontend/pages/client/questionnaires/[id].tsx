@@ -62,6 +62,7 @@ interface Questionnaire {
   type: string;
   is_paginated: boolean;
   requires_completion: boolean;
+  number_of_attempts: number;
   questions: Question[];
 }
 
@@ -75,9 +76,23 @@ interface ResponseState {
   };
 }
 
+interface QuestionnaireAttempt {
+  id: number;
+  questionnaire_id: number;
+  user_id: number;
+  started_at: string;
+  completed_at: string | null;
+}
+
+interface AttemptsData {
+  attempts: QuestionnaireAttempt[];
+  completed_count: number;
+  remaining_attempts: number;
+}
+
 const TakeQuestionnaire: React.FC = () => {
   const router = useRouter();
-  const { id } = router.query;
+  const { id, responseId: urlResponseId } = router.query;
   const { user } = useAuth();
   
   const [questionnaire, setQuestionnaire] = useState<Questionnaire | null>(null);
@@ -92,6 +107,13 @@ const TakeQuestionnaire: React.FC = () => {
     questionId: null
   });
   
+  // Attempts data
+  const [attemptsData, setAttemptsData] = useState<AttemptsData | null>(null);
+  const [loadingAttempts, setLoadingAttempts] = useState(false);
+  
+  // Set read-only mode if we're viewing a completed questionnaire
+  const [isReadOnly, setIsReadOnly] = useState(false);
+  
   // Timer refs for saving after typing pauses
   const saveTimers = useRef<{[key: number]: NodeJS.Timeout}>({});
   // Timer refs for question time limits
@@ -102,6 +124,28 @@ const TakeQuestionnaire: React.FC = () => {
   }}>({});
   const [questionTimeLeft, setQuestionTimeLeft] = useState<{[key: number]: number}>({});
   
+  // Effect to fetch attempts data
+  useEffect(() => {
+    if (!id) return;
+    
+    const fetchAttempts = async () => {
+      setLoadingAttempts(true);
+      try {
+        const data = await callFrontendApi<AttemptsData>(
+          `/api/questionnaires/${id}/attempts`,
+          'GET'
+        );
+        setAttemptsData(data);
+      } catch (err) {
+        console.error('Error fetching attempts:', err);
+      } finally {
+        setLoadingAttempts(false);
+      }
+    };
+    
+    fetchAttempts();
+  }, [id]);
+  
   // Effect to fetch questionnaire data
   useEffect(() => {
     const fetchQuestionnaire = async () => {
@@ -109,13 +153,56 @@ const TakeQuestionnaire: React.FC = () => {
       
       setLoading(true);
       try {
-        // Start the questionnaire response
-        const startData = await callFrontendApi<{ response_id: number }>(
-          `/api/questionnaires/${id}/start`,
-          'POST'
-        );
+        let responseIdToUse = urlResponseId ? Number(urlResponseId) : null;
         
-        setResponseId(startData.response_id);
+        // If we have a response ID, check if it's completed
+        if (responseIdToUse) {
+          try {
+            const responseData = await callFrontendApi<{ completed_at: string | null }>(
+              `/api/questionnaires/${id}/responses/${responseIdToUse}`,
+              'GET'
+            );
+            setIsReadOnly(responseData.completed_at !== null);
+          } catch (err: any) {
+            // Handle authentication errors
+            if (err.response?.status === 401) {
+              // Let the AuthContext handle the redirection
+              throw err;
+            }
+            console.error('Error fetching response status:', err);
+            setIsReadOnly(false);
+          }
+        } else {
+          setIsReadOnly(false);
+        }
+        
+        // If we're not in read-only mode and don't have a response ID, start a new attempt
+        if (!isReadOnly && !responseIdToUse) {
+          try {
+            // Start the questionnaire response
+            const startData = await callFrontendApi<{ response_id: number, is_new_attempt: boolean }>(
+              `/api/questionnaires/${id}/start`,
+              'POST'
+            );
+            
+            responseIdToUse = startData.response_id;
+          } catch (err: any) {
+            // Handle authentication errors
+            if (err.response?.status === 401) {
+              // Let the AuthContext handle the redirection
+              throw err;
+            }
+            // If we hit the max attempts limit, display an error
+            if (err.response && err.response.status === 400) {
+              setError(formatErrorMessage(err, 'Maximum number of attempts reached'));
+              setLoading(false);
+              return;
+            }
+            throw err;
+          }
+        }
+        
+        setResponseId(responseIdToUse);
         
         // Get the questionnaire details
         const qData = await callFrontendApi<Questionnaire>(
@@ -136,6 +223,39 @@ const TakeQuestionnaire: React.FC = () => {
           };
         });
         
+        // Fetch existing responses if a response ID is available
+        if (responseIdToUse) {
+          try {
+            const existingResponses = await callFrontendApi<{ responses: Record<string, any> }>(
+              `/api/questionnaires/${id}/responses/${responseIdToUse}`,
+              'GET'
+            );
+            
+            if (existingResponses && existingResponses.responses) {
+              // Update responses with existing answers
+              Object.entries(existingResponses.responses).forEach(([questionId, data]) => {
+                const qId = parseInt(questionId);
+                if (initialResponses[qId]) {
+                  initialResponses[qId] = {
+                    ...initialResponses[qId],
+                    answer: data.answer,
+                    saved: true,
+                    interactionBatchId: data.interactionBatchId
+                  };
+                }
+              });
+            }
+          } catch (err: any) {
+            // Handle authentication errors
+            if (err.response?.status === 401) {
+              // Let the AuthContext handle the redirection
+              throw err;
+            }
+            console.error('Error fetching existing responses:', err);
+            // Continue without existing responses
+          }
+        }
+        
         setResponses(initialResponses);
         setLoading(false);
         setError(null);
@@ -152,7 +272,7 @@ const TakeQuestionnaire: React.FC = () => {
       Object.values(saveTimers.current).forEach(timer => clearTimeout(timer));
       Object.values(questionTimers.current).forEach(timerObj => clearTimeout(timerObj.timer));
     };
-  }, [id]);
+  }, [id, urlResponseId]);
   
   // Get current page questions
   const getCurrentPageQuestions = () => {
@@ -175,6 +295,9 @@ const TakeQuestionnaire: React.FC = () => {
   
   // Handle answer change for a question
   const handleAnswerChange = (question: Question, value: any) => {
+    // Don't allow changes in read-only mode
+    if (isReadOnly) return;
+
     let newValue = value;
     
     // Handle multiple choice multiple differently
@@ -299,6 +422,7 @@ const TakeQuestionnaire: React.FC = () => {
         `/api/questionnaires/${questionnaire?.id}/responses/${responseId}/questions/${question.id}`,
         'POST',
         {
+          question_id: question.id,
           answer: {
             value: responses[question.id].answer
           },
@@ -330,14 +454,23 @@ const TakeQuestionnaire: React.FC = () => {
           questionId: null
         });
       }, 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving response:', error);
+      
+      // Extract error message from the error response
+      let errorMessage = 'Failed to save response';
+      if (error.response?.data?.error) {
+        errorMessage = error.response.data.error;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       setResponses(prev => ({
         ...prev,
         [question.id]: {
           ...prev[question.id],
           saving: false,
-          error: formatErrorMessage(error, 'Failed to save response')
+          error: errorMessage
         }
       }));
     }
@@ -413,6 +546,21 @@ const TakeQuestionnaire: React.FC = () => {
       error: null
     };
     
+    // Format the answer for display
+    const displayAnswer = () => {
+      if (Array.isArray(responseState.answer)) {
+        return responseState.answer.join(', ');
+      }
+      if (typeof responseState.answer === 'object' && responseState.answer !== null) {
+        // Handle answers wrapped in a value property
+        if ('value' in responseState.answer) {
+          return responseState.answer.value;
+        }
+        return JSON.stringify(responseState.answer);
+      }
+      return responseState.answer || '';
+    };
+    
     return (
       <Card key={question.id} sx={{ mb: 4, position: 'relative' }}>
         {responseState.saving && (
@@ -453,24 +601,24 @@ const TakeQuestionnaire: React.FC = () => {
               fullWidth
               multiline={question.configuration.answer_box_size !== 'small'}
               rows={question.configuration.answer_box_size === 'large' ? 6 : 3}
-              value={responseState.answer || ''}
+              value={displayAnswer()}
               onChange={(e) => handleAnswerChange(question, e.target.value)}
               placeholder="Enter your answer here"
-              disabled={submitting}
+              disabled={submitting || isReadOnly}
             />
           )}
           
           {/* Multiple choice single answer */}
           {question.type === 'multiple_choice_single' && (
             <RadioGroup
-              value={responseState.answer || ''}
+              value={displayAnswer()}
               onChange={(e) => handleAnswerChange(question, e.target.value)}
             >
               {question.configuration.choices.map((choice, index) => (
                 <FormControlLabel
                   key={index}
                   value={choice}
-                  control={<Radio disabled={submitting} />}
+                  control={<Radio disabled={submitting || isReadOnly} />}
                   label={choice}
                 />
               ))}
@@ -485,9 +633,9 @@ const TakeQuestionnaire: React.FC = () => {
                   key={index}
                   control={
                     <Checkbox
-                      checked={responseState.answer?.includes(choice) || false}
+                      checked={Array.isArray(responseState.answer) && responseState.answer.includes(choice)}
                       onChange={() => handleAnswerChange(question, choice)}
-                      disabled={submitting}
+                      disabled={submitting || isReadOnly}
                     />
                   }
                   label={choice}
@@ -581,11 +729,41 @@ const TakeQuestionnaire: React.FC = () => {
     <Box sx={{ my: 4, maxWidth: 800, mx: 'auto' }}>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" component="h1" gutterBottom>
-          {questionnaire.title}
+          {questionnaire?.title}
+          {isReadOnly && (
+            <Chip 
+              label="Read Only" 
+              color="primary" 
+              size="small" 
+              sx={{ ml: 2, verticalAlign: 'middle' }} 
+            />
+          )}
         </Typography>
         <Typography variant="body1" color="text.secondary" paragraph>
-          {questionnaire.description}
+          {questionnaire?.description}
         </Typography>
+        
+        {/* Attempts information */}
+        {attemptsData && (
+          <Box sx={{ mt: 2, mb: 3 }}>
+            <Typography variant="h6">
+              Attempts: {attemptsData.completed_count} of {questionnaire?.number_of_attempts}
+            </Typography>
+            
+            {/* Show button for new attempt if attempts remaining */}
+            {!isReadOnly && attemptsData.remaining_attempts > 0 && attemptsData.attempts.length > 0 && (
+              <Button
+                variant="contained"
+                color="primary"
+                sx={{ mt: 2 }}
+                onClick={() => router.push(`/client/questionnaires/${id}`)}
+              >
+                Start New Attempt
+              </Button>
+            )}
+          </Box>
+        )}
+        
         <Divider sx={{ my: 2 }} />
       </Box>
       
@@ -604,7 +782,7 @@ const TakeQuestionnaire: React.FC = () => {
       {getCurrentPageQuestions().map(question => renderQuestion(question))}
       
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 4 }}>
-        {questionnaire.is_paginated && currentPage > 1 && (
+        {questionnaire?.is_paginated && currentPage > 1 && (
           <Button
             variant="outlined"
             startIcon={<ArrowBackIcon />}
@@ -615,25 +793,38 @@ const TakeQuestionnaire: React.FC = () => {
           </Button>
         )}
         
-        {!questionnaire.is_paginated || currentPage < getMaxPages() ? (
-          <Button
-            variant="contained"
-            endIcon={<ArrowForwardIcon />}
-            onClick={handleNext}
-            disabled={questionnaire.requires_completion && !isCurrentPageValid() || submitting}
-            sx={{ ml: 'auto' }}
-          >
-            Next
-          </Button>
+        {!isReadOnly ? (
+          <>
+            {currentPage < getMaxPages() ? (
+              <Button
+                variant="contained"
+                endIcon={<ArrowForwardIcon />}
+                onClick={handleNext}
+                disabled={questionnaire?.requires_completion && !isCurrentPageValid() || submitting}
+                sx={{ ml: 'auto' }}
+              >
+                Next
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={handleSubmit}
+                disabled={questionnaire?.requires_completion && !isQuestionnaireValid() || submitting}
+                sx={{ ml: 'auto' }}
+              >
+                {submitting ? 'Submitting...' : 'Submit'}
+              </Button>
+            )}
+          </>
         ) : (
           <Button
             variant="contained"
             color="primary"
-            onClick={handleSubmit}
-            disabled={questionnaire.requires_completion && !isQuestionnaireValid() || submitting}
+            onClick={() => router.push('/client/questionnaires')}
             sx={{ ml: 'auto' }}
           >
-            {submitting ? 'Submitting...' : 'Submit'}
+            Back to Questionnaires
           </Button>
         )}
       </Box>
