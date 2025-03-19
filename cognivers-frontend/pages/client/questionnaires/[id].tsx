@@ -92,7 +92,7 @@ interface AttemptsData {
 
 const TakeQuestionnaire: React.FC = () => {
   const router = useRouter();
-  const { id, responseId: urlResponseId } = router.query;
+  const { id, attempt: urlAttempt } = router.query;
   const { user } = useAuth();
   
   const [questionnaire, setQuestionnaire] = useState<Questionnaire | null>(null);
@@ -153,7 +153,7 @@ const TakeQuestionnaire: React.FC = () => {
       
       setLoading(true);
       try {
-        let responseIdToUse = urlResponseId ? Number(urlResponseId) : null;
+        let responseIdToUse = urlAttempt ? Number(urlAttempt) : null;
         
         // If we have a response ID, check if it's completed
         if (responseIdToUse) {
@@ -272,7 +272,7 @@ const TakeQuestionnaire: React.FC = () => {
       Object.values(saveTimers.current).forEach(timer => clearTimeout(timer));
       Object.values(questionTimers.current).forEach(timerObj => clearTimeout(timerObj.timer));
     };
-  }, [id, urlResponseId]);
+  }, [id, urlAttempt]);
   
   // Get current page questions
   const getCurrentPageQuestions = () => {

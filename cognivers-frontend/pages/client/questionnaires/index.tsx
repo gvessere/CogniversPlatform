@@ -133,7 +133,7 @@ export default function ClientQuestionnaires() {
   };
 
   const startQuestionnaire = (id: number, responseId?: number) => {
-    const query = responseId ? `?responseId=${responseId}` : '';
+    const query = responseId ? `?attempt=${responseId}` : '';
     router.push(`/client/questionnaires/${id}${query}`);
   };
 
