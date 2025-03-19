@@ -470,14 +470,12 @@ async def activate_questionnaire_instance(
         )
     
     instance.is_active = True
-    instance.updated_by = current_user.id
     instance.updated_at = datetime.now()
     
-    await db.commit()
-    await db.refresh(instance)
-    
-    # Load the related questionnaire
+    # Load the related questionnaire before committing
     await db.refresh(instance, ["questionnaire"])
+    
+    await db.commit()
     
     return QuestionnaireInstanceResponse.model_validate(instance)
 
@@ -502,14 +500,12 @@ async def deactivate_questionnaire_instance(
         )
     
     instance.is_active = False
-    instance.updated_by = current_user.id
     instance.updated_at = datetime.now()
     
-    await db.commit()
-    await db.refresh(instance)
-    
-    # Load the related questionnaire
+    # Load the related questionnaire before committing
     await db.refresh(instance, ["questionnaire"])
+    
+    await db.commit()
     
     return QuestionnaireInstanceResponse.model_validate(instance)
 
@@ -577,6 +573,40 @@ async def delete_questionnaire(
 ):
     """Delete a specific questionnaire"""
     return await delete_questionnaire_instance(questionnaire_id, current_user, db)
+
+@router.post("/{session_id}/questionnaires/{questionnaire_id}/activate", response_model=QuestionnaireInstanceResponse)
+async def activate_questionnaire(
+    session_id: int,
+    questionnaire_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Activate a questionnaire instance"""
+    # Verify the questionnaire instance belongs to the session
+    instance = await get_questionnaire_instance_by_id(questionnaire_id, db)
+    if instance.session_id != session_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Questionnaire instance with ID {questionnaire_id} not found in session {session_id}"
+        )
+    return await activate_questionnaire_instance(questionnaire_id, current_user, db)
+
+@router.post("/{session_id}/questionnaires/{questionnaire_id}/deactivate", response_model=QuestionnaireInstanceResponse)
+async def deactivate_questionnaire(
+    session_id: int,
+    questionnaire_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Deactivate a questionnaire instance"""
+    # Verify the questionnaire instance belongs to the session
+    instance = await get_questionnaire_instance_by_id(questionnaire_id, db)
+    if instance.session_id != session_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Questionnaire instance with ID {questionnaire_id} not found in session {session_id}"
+        )
+    return await deactivate_questionnaire_instance(questionnaire_id, current_user, db)
 
 # ==================== Client Session Enrollment Routes ====================
 

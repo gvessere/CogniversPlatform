@@ -124,6 +124,9 @@ class QuestionResponse(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     question_id: int = Field(foreign_key="questions.id")
     questionnaire_response_id: int = Field(foreign_key="questionnaire_responses.id")
+    question_text: str  # Store the question text at the time of response
+    question_type: QuestionType  # Store the question type at the time of response
+    question_configuration: Dict = Field(sa_column=Column(JSON))  # Store the question configuration at the time of response
     answer: Dict = Field(sa_column=Column(JSON))  # Stores text or selected choices
     started_at: datetime = Field(default_factory=datetime.now)
     last_updated_at: datetime = Field(default_factory=datetime.now)
@@ -136,7 +139,7 @@ class QuestionResponse(SQLModel, table=True):
     interaction_batch: Optional["InteractionBatch"] = Relationship()
 
     class Config:
-        table = True 
+        table = True
 
 class ClientSessionEnrollment(SQLModel, table=True):
     __tablename__ = "client_session_enrollments"

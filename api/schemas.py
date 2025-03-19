@@ -280,6 +280,9 @@ class QuestionResponseCreate(BaseModel):
 
 class QuestionResponseSubmitResponse(BaseResponseModel):
     question_id: int
+    question_text: str
+    question_type: QuestionType
+    question_configuration: Dict[str, Any]
     answer: Dict[str, Any]
     interaction_batch_id: Optional[int] = None
     started_at: datetime
@@ -292,6 +295,12 @@ class QuestionResponseSubmitResponse(BaseResponseModel):
             "example": {
                 "id": 1,
                 "question_id": 1,
+                "question_text": "How would you rate your experience?",
+                "question_type": "multiple_choice_single",
+                "question_configuration": {
+                    "choices": ["Poor", "Fair", "Good", "Excellent"],
+                    "answer_box_size": "medium"
+                },
                 "answer": {"text": "Sample answer"},
                 "interaction_batch_id": 1,
                 "started_at": "2024-03-20T10:00:00",
@@ -468,7 +477,8 @@ class QuestionnaireAttemptResponse(BaseResponseModel):
                 "responses": {
                     "1": {
                         "answer": {"value": "Sample answer"},
-                        "interactionBatchId": 1
+                        "interactionBatchId": 1,
+                        "question_text": "How would you rate our service?"
                     }
                 }
             }

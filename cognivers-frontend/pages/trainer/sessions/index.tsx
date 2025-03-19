@@ -262,13 +262,13 @@ export default function SessionsList() {
     }
   };
 
-  const handleToggleActive = async (instanceId: number, isActive: boolean) => {
+  const handleToggleActive = async (sessionId: number, instanceId: number, isActive: boolean) => {
     try {
       let updatedInstance;
       if (isActive) {
-        updatedInstance = await deactivateQuestionnaireInstance(instanceId);
+        updatedInstance = await deactivateQuestionnaireInstance(sessionId, instanceId);
       } else {
-        updatedInstance = await activateQuestionnaireInstance(instanceId);
+        updatedInstance = await activateQuestionnaireInstance(sessionId, instanceId);
       }
 
       // Update the instance in the sessions state
@@ -438,7 +438,7 @@ export default function SessionsList() {
                                           variant="outlined"
                                           size="small"
                                           color={instance.is_active ? "error" : "success"}
-                                          onClick={() => handleToggleActive(instance.id, instance.is_active)}
+                                          onClick={() => handleToggleActive(session.id, instance.id, instance.is_active)}
                                           sx={{ textTransform: 'none' }}
                                         >
                                           {instance.is_active ? "Deactivate" : "Activate"}

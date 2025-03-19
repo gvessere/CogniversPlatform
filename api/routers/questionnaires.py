@@ -791,10 +791,13 @@ async def submit_question_response(
         if response_data.interaction_batch_id:
             question_response.interaction_batch_id = response_data.interaction_batch_id
     else:
-        # Create new response
+        # Create new response with question details
         question_response = QuestionResponse(
             question_id=question_id,
             questionnaire_response_id=response_id,
+            question_text=question.text,
+            question_type=question.type,
+            question_configuration=question.configuration,
             answer=response_data.answer,
             interaction_batch_id=response_data.interaction_batch_id
         )
@@ -804,6 +807,9 @@ async def submit_question_response(
     
     return schemas.QuestionResponseSubmitResponse(
         question_id=question_id,
+        question_text=question.text,
+        question_type=question.type,
+        question_configuration=question.configuration,
         answer=response_data.answer,
         interaction_batch_id=response_data.interaction_batch_id,
         started_at=question_response.started_at,
@@ -1137,7 +1143,8 @@ async def get_questionnaire_response(
     for qr in questionnaire_response.question_responses:
         responses[str(qr.question_id)] = {
             "answer": qr.answer,
-            "interactionBatchId": qr.interaction_batch_id
+            "interactionBatchId": qr.interaction_batch_id,
+            "question_text": qr.question_text
         }
     
     return {
@@ -1215,10 +1222,13 @@ async def create_question_response(
         if question_response.interaction_batch_id:
             existing_question_response.interaction_batch_id = question_response.interaction_batch_id
     else:
-        # Create new response
+        # Create new response with question details
         new_question_response = QuestionResponse(
             question_id=question_response.question_id,
             questionnaire_response_id=response_id,
+            question_text=question.text,
+            question_type=question.type,
+            question_configuration=question.configuration,
             answer=question_response.answer,
             interaction_batch_id=question_response.interaction_batch_id
         )

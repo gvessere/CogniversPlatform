@@ -244,13 +244,17 @@ export default function SessionDetail() {
   };
 
   const handleToggleActive = async (instance: QuestionnaireInstance) => {
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
     try {
       let updatedInstance;
       
       if (instance.is_active) {
-        updatedInstance = await deactivateQuestionnaireInstance(instance.id);
+        updatedInstance = await deactivateQuestionnaireInstance(session.id, instance.id);
       } else {
-        updatedInstance = await activateQuestionnaireInstance(instance.id);
+        updatedInstance = await activateQuestionnaireInstance(session.id, instance.id);
       }
       
       if (updatedInstance) {

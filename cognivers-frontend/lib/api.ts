@@ -945,13 +945,14 @@ export async function deleteQuestionnaireInstance(questionnaireId: string): Prom
 
 /**
  * Activates a questionnaire attached to a session
+ * @param sessionId - The ID of the session
  * @param questionnaireId - The ID of the questionnaire to activate
  * @returns Success status
  */
-export async function activateQuestionnaireInstance(questionnaireId: string): Promise<any> {
+export async function activateQuestionnaireInstance(sessionId: number, questionnaireId: number): Promise<any> {
   try {
     return await callFrontendApi(
-      `/api/sessions/questionnaires/actions/activate?questionnaireId=${questionnaireId}`, 
+      `/api/sessions/${sessionId}/questionnaires/${questionnaireId}/activate`, 
       'POST', 
       undefined, 
       { resource: 'questionnaires' }
@@ -965,13 +966,14 @@ export async function activateQuestionnaireInstance(questionnaireId: string): Pr
 
 /**
  * Deactivates a questionnaire attached to a session
+ * @param sessionId - The ID of the session
  * @param questionnaireId - The ID of the questionnaire to deactivate
  * @returns Success status
  */
-export async function deactivateQuestionnaireInstance(questionnaireId: string): Promise<any> {
+export async function deactivateQuestionnaireInstance(sessionId: number, questionnaireId: number): Promise<any> {
   try {
     return await callFrontendApi(
-      `/api/sessions/questionnaires/actions/deactivate?questionnaireId=${questionnaireId}`, 
+      `/api/sessions/${sessionId}/questionnaires/${questionnaireId}/deactivate`, 
       'POST', 
       undefined, 
       { resource: 'questionnaires' }
