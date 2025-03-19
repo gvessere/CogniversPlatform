@@ -166,11 +166,6 @@ const TakeQuestionnaire: React.FC = () => {
             );
             setIsReadOnly(responseData.completed_at !== null);
           } catch (err: any) {
-            // Handle authentication errors
-            if (err.response?.status === 401) {
-              // Let the AuthContext handle the redirection
-              throw err;
-            }
             console.error('Error fetching response status:', err);
             setIsReadOnly(false);
           }
@@ -189,18 +184,10 @@ const TakeQuestionnaire: React.FC = () => {
             
             responseIdToUse = startData.response_id;
           } catch (err: any) {
-            // Handle authentication errors
-            if (err.response?.status === 401) {
-              // Let the AuthContext handle the redirection
-              throw err;
-            }
-            // If we hit the max attempts limit, display an error
-            if (err.response && err.response.status === 400) {
-              setError(formatErrorMessage(err, 'Maximum number of attempts reached'));
-              setLoading(false);
-              return;
-            }
-            throw err;
+            console.error('Error starting questionnaire:', err);
+            setError(err.message || 'Failed to start questionnaire');
+            setLoading(false);
+            return;
           }
         }
         
@@ -249,11 +236,6 @@ const TakeQuestionnaire: React.FC = () => {
               });
             }
           } catch (err: any) {
-            // Handle authentication errors
-            if (err.response?.status === 401) {
-              // Let the AuthContext handle the redirection
-              throw err;
-            }
             console.error('Error fetching existing responses:', err);
             // Continue without existing responses
           }

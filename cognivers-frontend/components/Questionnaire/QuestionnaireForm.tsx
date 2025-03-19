@@ -349,9 +349,9 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({
     
     try {
       await onSubmit(formState);
-    } catch (error) {
-      setError(formatErrorMessage(error, 'An error occurred while saving the questionnaire'));
-      console.error('Error saving questionnaire:', error);
+    } catch (err: any) {
+      console.error('Error saving questionnaire:', err);
+      setError(err.message || `Failed to save questionnaire. Please try again.`);
     }
   };
 

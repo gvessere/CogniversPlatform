@@ -733,52 +733,22 @@ export function handleApiError(error: any, defaultMessage: string = 'An error oc
   const sessionId = error.headers?.['x-session-id'];
   const interactionBatchId = error.headers?.['x-interaction-batch-id'];
   
-  // Handle 401 errors specially - they should be handled by AuthContext
-  if (status === 401) {
-    throw new Error('Please log in again to continue.');
+  // Prioritize application-specific error messages
+  if (data?.detail) {
+    throw new Error(data.detail);
   }
   
-  // Handle 403 errors
-  if (status === 403) {
-    throw new Error('You do not have permission to perform this action.');
-  }
-  
-  // Handle 404 errors
-  if (status === 404) {
-    throw new Error('The requested resource was not found.');
-  }
-  
-  // Handle 422 validation errors
-  if (status === 422) {
-    // If the error has a detail field, use it
-    if (data?.detail) {
-      throw new Error(data.detail);
-    }
-    // If it's an array of errors, join them
-    if (Array.isArray(data)) {
-      throw new Error(data.map(err => err.msg || err.message || err).join(', '));
-    }
-    // If it's an object with a message field
-    if (data?.message) {
-      throw new Error(data.message);
-    }
-    // If it's an object with an error field
-    if (data?.error) {
-      throw new Error(data.error);
-    }
-    // Fallback to a generic validation error message
-    throw new Error('The provided data is invalid. Please check your input and try again.');
-  }
-  
-  // Handle other errors
+  // Fallback to error message from the error object
   if (data?.message) {
     throw new Error(data.message);
   }
   
+  // Fallback to error message from the error object
   if (data?.error) {
     throw new Error(data.error);
   }
   
+  // If no specific error message is available, throw the default message
   throw new Error(defaultMessage);
 }
 

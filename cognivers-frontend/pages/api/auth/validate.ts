@@ -18,27 +18,13 @@ export default async function handler(
     }
 
     try {
-        // Validate using the backend /auth/validate endpoint
-        try {
-            // Use the auth/validate endpoint which is specifically designed for token validation
-            await callBackendApi('/auth/validate', 'GET', null, token);
-            
-            // If we get here, the token is valid
-            return res.json({ valid: true });
-        } catch (validateError: any) {
-            // Check if error is specifically about authentication
-            if (validateError.response && (validateError.response.status === 401 || validateError.response.status === 403)) {
-                return res.status(401).json({ valid: false });
-            }
-            
-            // For other types of errors (like server errors, network issues), return invalid
-            // This is a more secure approach than falling back to client-side validation
-            console.error('Error validating token:', validateError);
-            return res.status(401).json({ valid: false });
-        }
-    } catch (error) {
-        // Any unexpected errors should be treated as invalid token
-        console.error('Unexpected error in validate endpoint:', error);
+        // Use the auth/validate endpoint which is specifically designed for token validation
+        await callBackendApi('/auth/validate', 'GET', null, token);
+        
+        // If we get here, the token is valid
+        return res.json({ valid: true });
+    } catch (error: any) {
+        console.error('Error validating token:', error);
         return res.status(401).json({ valid: false });
     }
 }

@@ -1,5 +1,20 @@
-import { useState, useEffect, useContext, createContext } from 'react';
+import React, { useState, useEffect, useContext, createContext } from 'react';
 import { User } from '../lib/types';
+import { postData } from '../lib/api';
+import { useRouter } from 'next/router';
+
+interface SignupFormValues {
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  dob: string | null;
+}
+
+interface LoginResponse {
+  success: boolean;
+  message?: string;
+}
 
 interface AuthContextType {
   user: User | null;
@@ -7,64 +22,44 @@ interface AuthContextType {
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  signup: (userData: any) => Promise<void>;
+  signup: (userData: SignupFormValues) => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  loading: false,
-  error: null,
-  login: async () => {},
-  logout: async () => {},
-  signup: async () => {},
-});
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  const fetchUser = async () => {
+    try {
+      const userData = await postData<User>('/api/auth/me', null);
+      setUser(userData);
+    } catch (err: any) {
+      console.error('Error fetching user:', err);
+      setError(err.message || 'Failed to fetch user data');
+    }
+  };
 
   useEffect(() => {
-    // Check if user is logged in on mount
-    const checkAuth = async () => {
-      setLoading(true);
-      try {
-        // Get user from localStorage or session
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          setUser(JSON.parse(storedUser));
-        }
-      } catch (err) {
-        console.error('Auth error:', err);
-        setError('Authentication failed');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    checkAuth();
+    fetchUser();
   }, []);
 
   const login = async (email: string, password: string) => {
     setLoading(true);
     setError(null);
     try {
-      // Mock login for now - replace with actual API call
-      const mockUser: User = {
-        id: 1,
-        email,
-        first_name: 'Test',
-        last_name: 'User',
-        role: 'CLIENT' as any,
-      };
-      
-      // Store user in localStorage
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      setUser(mockUser);
+      const response = await postData<LoginResponse>('/api/auth/login', { email, password });
+      if (response.success) {
+        await fetchUser();
+      } else {
+        setError(response.message || 'Login failed');
+      }
     } catch (err: any) {
       console.error('Login error:', err);
       setError(err.message || 'Login failed');
-      throw err;
     } finally {
       setLoading(false);
     }
@@ -72,10 +67,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     setLoading(true);
+    setError(null);
     try {
-      // Clear user from localStorage
-      localStorage.removeItem('user');
+      await postData('/api/auth/logout', null);
       setUser(null);
+      router.push('/login');
     } catch (err: any) {
       console.error('Logout error:', err);
       setError(err.message || 'Logout failed');
@@ -84,17 +80,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signup = async (userData: any) => {
+  const signup = async (userData: SignupFormValues) => {
     setLoading(true);
     setError(null);
     try {
-      // Mock signup for now - replace with actual API call
-      console.log('Signup with data:', userData);
-      // After successful signup, you might want to log the user in automatically
+      await postData('/api/auth/signup', userData);
+      router.push('/login?success=signup');
     } catch (err: any) {
       console.error('Signup error:', err);
       setError(err.message || 'Signup failed');
-      throw err;
     } finally {
       setLoading(false);
     }

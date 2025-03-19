@@ -69,17 +69,9 @@ export default async function handler(
     } catch (error: any) {
         console.error('Error in /api/auth/me:', error);
         
-        // Handle specific error cases
-        if (error.response?.status === 401 || error.response?.status === 403) {
-            return res.status(401).json({ 
-                error: 'Authentication failed',
-                detail: 'Your session has expired. Please log in again.'
-            });
-        }
-        
-        return res.status(500).json({
-            error: 'Internal server error',
-            detail: 'Failed to retrieve user data'
+        // Return the error message from the API
+        return res.status(error.response?.status || 500).json({
+            error: error.response?.data?.detail || 'Failed to retrieve user data'
         });
     }
 } 

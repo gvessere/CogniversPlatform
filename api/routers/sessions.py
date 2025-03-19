@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlmodel import Session, select, and_
 from sqlalchemy.orm import selectinload
 from typing import List, Optional, Any, TypeVar, Generic
@@ -794,7 +794,7 @@ async def generate_new_session_code(
 # Route for clients to enroll in a session using a session code
 @router.post("/enroll", response_model=ClientSessionEnrollmentResponse)
 async def enroll_in_session_by_code(
-    session_code: str,
+    session_code: str = Body(..., embed=True),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
@@ -921,7 +921,7 @@ async def unenroll_client_from_session(
     
     # For trainers/admins, verify the session belongs to the trainer
     if current_user.role in [UserRole.TRAINER, UserRole.ADMINISTRATOR]:
-        session_query = select(SessionModel).where(
+        session_query: Select = select(SessionModel).where(
             and_(
                 SessionModel.id == session_id,
                 SessionModel.trainer_id == current_user.id
@@ -937,7 +937,7 @@ async def unenroll_client_from_session(
             )
     
     # Find and delete the enrollment
-    enrollment_query = select(ClientSessionEnrollment).where(
+    enrollment_query: Select = select(ClientSessionEnrollment).where(
         and_(
             ClientSessionEnrollment.client_id == client_id,
             ClientSessionEnrollment.session_id == session_id

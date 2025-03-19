@@ -168,7 +168,7 @@ export default function SessionForm({
       
       await onSubmit(sessionData);
     } catch (err: any) {
-      console.error(`Error ${isEdit ? 'updating' : 'creating'} session:`, err);
+      console.error('Error saving session:', err);
       setError(err.message || `Failed to ${isEdit ? 'update' : 'create'} session. Please try again.`);
     } finally {
       setSubmitting(false);

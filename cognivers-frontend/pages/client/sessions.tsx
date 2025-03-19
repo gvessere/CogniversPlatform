@@ -81,14 +81,16 @@ export default function ClientSessionsPage() {
     setTabValue(newValue);
   };
 
-  const handleEnrollInSession = async (sessionCode: string) => {
+  const handleEnrollInSession = async () => {
     if (!sessionCode.trim()) {
       setError('Please enter a session code');
       return;
     }
 
-    setJoinLoading(true);
+    setLoading(true);
     setError('');
+    setSuccess('');
+
     try {
       await enroll(sessionCode);
       setSuccess('Successfully enrolled in session!');
@@ -99,28 +101,14 @@ export default function ClientSessionsPage() {
         const enrolledData = await getClientEnrollments(user.id);
         setEnrolledSessions(enrolledData);
       }
+      
+      // Switch to the enrolled sessions tab
+      setTabValue(0);
     } catch (err: any) {
       console.error('Error enrolling in session:', err);
-      
-      // Handle "already enrolled" case as a success rather than an error
-      if (err.message && err.message.includes('already enrolled')) {
-        setSuccess('You are already enrolled in this session!');
-        setSessionCode('');
-        
-        // Refresh enrolled sessions
-        if (user) {
-          const enrolledData = await getClientEnrollments(user.id);
-          setEnrolledSessions(enrolledData);
-        }
-        
-        // Switch to the enrolled sessions tab
-        setTabValue(0);
-      } else {
-        // For other errors, show the error message
-        setError(err.message || 'Invalid session code. Please try again.');
-      }
+      setError(err.message || 'An error occurred while enrolling in the session.');
     } finally {
-      setJoinLoading(false);
+      setLoading(false);
     }
   };
 
@@ -283,7 +271,7 @@ export default function ClientSessionsPage() {
                 </Alert>
               </Box>
               
-              <Box component="form" onSubmit={(e) => { e.preventDefault(); handleEnrollInSession(sessionCode); }} sx={{ maxWidth: 400, mx: 'auto' }}>
+              <Box component="form" onSubmit={(e) => { e.preventDefault(); handleEnrollInSession(); }} sx={{ maxWidth: 400, mx: 'auto' }}>
                 <Typography variant="h6" gutterBottom>
                   Enroll in a Session
                 </Typography>
@@ -299,7 +287,10 @@ export default function ClientSessionsPage() {
                   onChange={(e) => setSessionCode(e.target.value)}
                   placeholder="Enter 6-digit code"
                   margin="normal"
-                  inputProps={{ maxLength: 6 }}
+                  inputProps={{ 
+                    maxLength: 6,
+                    autoComplete: "on"
+                  }}
                 />
                 
                 <Button

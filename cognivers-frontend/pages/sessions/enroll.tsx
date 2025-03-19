@@ -52,7 +52,7 @@ export default function SessionEnrollPage() {
         await handleEnroll();
       } catch (err: any) {
         console.error('Error enrolling in session:', err);
-        setError(err.message || 'Failed to enroll in session.');
+        setError(err.message || 'Failed to enroll in session. Please try again.');
       } finally {
         setLoading(false);
       }
@@ -91,31 +91,7 @@ export default function SessionEnrollPage() {
       sessionStorage.removeItem('pendingEnrollment');
     } catch (err: any) {
       console.error('Error enrolling in session:', err);
-      
-      // Handle "already enrolled" case as a success rather than an error
-      if (err.message && err.message.includes('already enrolled')) {
-        // Treat "already enrolled" as a success case
-        setSuccess(true);
-        
-        // Try to get the session info from the error response if possible
-        if (err.sessionId) {
-          try {
-            const sessionData = await getSession(err.sessionId);
-            setSession(sessionData);
-          } catch (e) {
-            console.error('Error fetching session after finding already enrolled:', e);
-          }
-        }
-        
-        // Remove the code from the URL
-        router.replace('/sessions/enroll', undefined, { shallow: true });
-        
-        // Clear any pending enrollment info
-        sessionStorage.removeItem('pendingEnrollment');
-      } else {
-        // For other errors, show the error message
-        setError(err.message || 'Failed to enroll in session. Please try again.');
-      }
+      setError(err.message || 'Failed to enroll in session. Please try again.');
     } finally {
       setEnrolling(false);
     }
