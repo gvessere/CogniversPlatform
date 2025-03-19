@@ -90,7 +90,7 @@ export const initialFormState: QuestionnaireFormData = {
   type: 'signup',
   is_paginated: false,
   requires_completion: true,
-  number_of_attempts: 10,
+  number_of_attempts: 1,
   questions: [{ ...initialQuestionState }],
   sessions: []
 };
