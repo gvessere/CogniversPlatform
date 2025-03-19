@@ -255,14 +255,9 @@ const QuestionnaireView: React.FC<QuestionnaireViewProps> = ({
             </Grid>
           )}
           <Grid item>
-            <TextField
-              fullWidth
-              label="Number of Attempts"
-              value={questionnaire.number_of_attempts}
-              readOnly
-              InputProps={{
-                readOnly: true
-              }}
+            <Chip 
+              label={`${questionnaire.number_of_attempts} Attempt${questionnaire.number_of_attempts !== 1 ? 's' : ''}`} 
+              color="info" 
             />
           </Grid>
         </Grid>
