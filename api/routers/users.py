@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 import logging
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from database import get_async_session
 from models.user import User, UserRole
 from jose import JWTError, jwt
@@ -13,6 +13,7 @@ import os
 from fastapi.security import OAuth2PasswordBearer
 import schemas
 from auth.dependencies import get_current_user
+from models.questionnaire import Session as SessionModel, ClientSessionEnrollment
 
 # Configure logging to exclude sensitive data
 logger = logging.getLogger(__name__)
@@ -86,11 +87,31 @@ async def get_trainer_clients(
             detail="Only trainers can view their clients"
         )
     
-    # For now, trainers can see all clients
-    result = await db.execute(
-        select(User).where(User.role == UserRole.CLIENT)
+    # Get all sessions where the current user is the trainer
+    sessions_query = select(SessionModel).where(SessionModel.trainer_id == current_user.id)
+    sessions_result = await db.execute(sessions_query)
+    trainer_sessions = sessions_result.scalars().all()
+    
+    if not trainer_sessions:
+        return []
+    
+    # Get all client enrollments for these sessions
+    session_ids = [session.id for session in trainer_sessions]
+    enrollments_query = select(ClientSessionEnrollment).where(
+        ClientSessionEnrollment.session_id.in_(session_ids)
     )
-    clients = result.scalars().all()
+    enrollments_result = await db.execute(enrollments_query)
+    enrollments = enrollments_result.scalars().all()
+    
+    # Get unique client IDs from enrollments
+    client_ids = list(set(enrollment.client_id for enrollment in enrollments))
+    
+    # Get all clients who are enrolled in the trainer's sessions
+    clients_query = select(User).where(
+            User.id.in_(client_ids)
+    )
+    clients_result = await db.execute(clients_query)
+    clients = clients_result.scalars().all()
     
     return [schemas.UserResponse.from_orm(client) for client in clients]
 
