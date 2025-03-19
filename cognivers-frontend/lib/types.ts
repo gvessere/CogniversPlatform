@@ -17,6 +17,7 @@ export interface User {
   role: UserRole;
   dob?: string | null;
   supervisor?: string | null;
+  sessions?: ClientSessionInfo[];
   [key: string]: any; // For additional properties
 }
 
@@ -164,4 +165,19 @@ export interface ClientSessionEnrollmentCreateData {
   client_id: number;
   session_id: number;
   status?: string;
+}
+
+export interface ClientSessionInfo {
+  session_id: number;
+  session_name: string;
+  status: SessionStatus;
+  enrolled_at: string;
+  trainer_id: number;
+  trainer_name: string;
+}
+
+export enum SessionStatus {
+  ACTIVE = "active",
+  COMPLETED = "completed",
+  CANCELLED = "cancelled"
 } 

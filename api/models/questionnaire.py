@@ -34,6 +34,7 @@ class Session(SQLModel, table=True):
     trainer_id: int = Field(foreign_key="user.id")
     is_public: bool = Field(default=True)
     session_code: Optional[str] = Field(default=None, index=True)
+    status: str = Field(default="active")  # active, completed, cancelled
     
     # Relationships
     created_by: "User" = Relationship(sa_relationship_kwargs={"foreign_keys": "[Session.created_by_id]"})

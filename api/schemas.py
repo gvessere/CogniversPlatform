@@ -940,3 +940,30 @@ class ClientSessionEnrollmentResponse(ClientSessionEnrollmentBase, BaseResponseM
             }
         }
 
+class SessionStatus(str, Enum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+class ClientSessionInfo(BaseModel):
+    session_id: int
+    session_name: str
+    status: SessionStatus
+    enrolled_at: datetime
+    trainer_id: int
+    trainer_name: str
+
+    class Config:
+        from_attributes = True
+
+class ClientWithSessions(BaseModel):
+    id: int
+    email: str
+    first_name: str
+    last_name: str
+    role: str
+    sessions: List[ClientSessionInfo]
+
+    class Config:
+        from_attributes = True
+

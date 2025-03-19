@@ -21,17 +21,21 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  Collapse
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import { format, parseISO } from 'date-fns';
 import CreateUserDialog from './CreateUserDialog';
-import { postData } from '../../lib/api';
+import ClientSessions from '../ClientSessions/ClientSessions';
+import { postData, deleteData } from '../../lib/api';
 import { useRouter } from 'next/router';
-import { User, UserRole } from '../../lib/types';
+import { User, UserRole, ClientSessionEnrollment } from '../../lib/types';
 
 interface UserListProps {
   users: User[];
@@ -73,6 +77,93 @@ const roleMatches = (role: string | UserRole, targetRole: string | UserRole): bo
   
   return roleString === targetRoleString;
 };
+
+interface RowProps {
+  user: User;
+  onRoleChange?: (userId: number, newRole: UserRole) => Promise<void>;
+  onUserSelect?: (user: User) => void;
+  onUserDelete?: (userId: number) => Promise<void>;
+  currentUserRole: string | UserRole;
+  onUnenroll?: (clientId: number, sessionId: number) => Promise<void>;
+}
+
+function Row({ user, onRoleChange, onUserSelect, onUserDelete, currentUserRole, onUnenroll }: RowProps) {
+  const [open, setOpen] = useState(false);
+
+  const handleUnenroll = async (sessionId: number) => {
+    if (onUnenroll) {
+      await onUnenroll(user.id, sessionId);
+    }
+  };
+
+  const handleClick = () => {
+    setOpen(!open);
+  };
+
+  return (
+    <>
+      <TableRow hover>
+        <TableCell>
+          <IconButton size="small" onClick={handleClick}>
+            {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+          </IconButton>
+        </TableCell>
+        <TableCell>{user.first_name} {user.last_name}</TableCell>
+        <TableCell>{user.email}</TableCell>
+        <TableCell>
+          {onRoleChange ? (
+            <Select
+              value={user.role}
+              onChange={(e) => onRoleChange(user.id, e.target.value as UserRole)}
+              size="small"
+            >
+              {Object.values(UserRole).map((role) => (
+                <MenuItem key={role} value={role}>
+                  {role}
+                </MenuItem>
+              ))}
+            </Select>
+          ) : (
+            user.role
+          )}
+        </TableCell>
+        <TableCell>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            {onUserSelect && (
+              <Tooltip title="View details">
+                <IconButton size="small" onClick={() => onUserSelect(user)}>
+                  <EditIcon />
+                </IconButton>
+              </Tooltip>
+            )}
+            {onUserDelete && (
+              <Tooltip title="Delete user">
+                <IconButton size="small" onClick={() => onUserDelete(user.id)}>
+                  <DeleteIcon />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
+        </TableCell>
+      </TableRow>
+      <TableRow>
+        <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={6}>
+          <Collapse in={open} timeout="auto" unmountOnExit>
+            <Box sx={{ margin: 1 }}>
+              <Typography variant="h6" gutterBottom component="div">
+                Sessions
+              </Typography>
+              <ClientSessions
+                sessions={user.sessions || []}
+                onUnenroll={handleUnenroll}
+              />
+            </Box>
+          </Collapse>
+        </TableCell>
+      </TableRow>
+    </>
+  );
+}
 
 export default function UserList({
   users,
@@ -189,6 +280,15 @@ export default function UserList({
     }
   };
 
+  const handleUnenroll = async (clientId: number, sessionId: number) => {
+    try {
+      await deleteData(`/api/users/clients/${clientId}/sessions/${sessionId}`);
+      onRefresh();
+    } catch (error) {
+      console.error('Error unenrolling client:', error);
+    }
+  };
+
   const filteredUsers = getFilteredUsers();
   const emptyRows = page > 0 ? Math.max(0, (1 + page) * rowsPerPage - filteredUsers.length) : 0;
 
@@ -226,6 +326,7 @@ export default function UserList({
         <Table>
           <TableHead>
             <TableRow>
+              <TableCell />
               {headCells.map((headCell) => (
                 <TableCell
                   key={headCell.id}
@@ -265,62 +366,15 @@ export default function UserList({
                 {filteredUsers
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((user) => (
-                    <TableRow
+                    <Row
                       key={user.id}
-                      hover={roleMatches(currentUserRole, UserRole.TRAINER) || roleMatches(currentUserRole, UserRole.ADMINISTRATOR)}
-                      onClick={() => handleUserClick(user.id)}
-                      sx={{
-                        cursor: roleMatches(currentUserRole, UserRole.TRAINER) || roleMatches(currentUserRole, UserRole.ADMINISTRATOR)
-                          ? 'pointer'
-                          : 'default'
-                      }}
-                    >
-                      <TableCell>
-                        {user.first_name} {user.last_name}
-                      </TableCell>
-                      <TableCell>{user.email}</TableCell>
-                      <TableCell>
-                        {isAdmin ? (
-                          <Select
-                            value={user.role}
-                            onChange={(e) => onRoleChange && onRoleChange(user.id, e.target.value as UserRole)}
-                            size="small"
-                          >
-                            <MenuItem value={UserRole.CLIENT}>Client</MenuItem>
-                            <MenuItem value={UserRole.TRAINER}>Trainer</MenuItem>
-                            <MenuItem value={UserRole.ADMINISTRATOR}>Administrator</MenuItem>
-                          </Select>
-                        ) : (
-                          user.role
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {user.dob ? format(parseISO(user.dob), 'MM/dd/yyyy') : '-'}
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', gap: 1 }}>
-                          <Tooltip title="View Details">
-                            <IconButton
-                              size="small"
-                              onClick={() => onUserSelect && onUserSelect(user)}
-                            >
-                              <EditIcon />
-                            </IconButton>
-                          </Tooltip>
-                          {isAdmin && onUserDelete && (
-                            <Tooltip title="Delete User">
-                              <IconButton
-                                size="small"
-                                onClick={() => handleDeleteClick(user.id)}
-                                color="error"
-                              >
-                                <DeleteIcon />
-                              </IconButton>
-                            </Tooltip>
-                          )}
-                        </Box>
-                      </TableCell>
-                    </TableRow>
+                      user={user}
+                      onRoleChange={onRoleChange}
+                      onUserSelect={onUserSelect}
+                      onUserDelete={onUserDelete}
+                      currentUserRole={currentUserRole}
+                      onUnenroll={handleUnenroll}
+                    />
                   ))}
                 {emptyRows > 0 && (
                   <TableRow style={{ height: 53 * emptyRows }}>

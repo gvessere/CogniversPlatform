@@ -18,9 +18,16 @@ depends_on: Optional[List[str]] = None
 
 
 def upgrade() -> None:
-    # Add question_type and question_configuration columns
-    op.add_column('question_responses', sa.Column('question_type', sa.String(), nullable=True))
-    op.add_column('question_responses', sa.Column('question_configuration', postgresql.JSON(), nullable=True))
+    # Check if columns exist before adding them
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('question_responses')]
+    
+    # Add question_type and question_configuration columns if they don't exist
+    if 'question_type' not in columns:
+        op.add_column('question_responses', sa.Column('question_type', sa.String(), nullable=True))
+    if 'question_configuration' not in columns:
+        op.add_column('question_responses', sa.Column('question_configuration', postgresql.JSON(), nullable=True))
     
     # Update existing rows with data from questions table
     op.execute("""
