@@ -183,7 +183,7 @@ export default function ClientQuestionnaires() {
           <Divider sx={{ my: 2 }} />
           
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 }}>
               <Box>
                 {questionnaire.is_completed ? (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -213,7 +213,6 @@ export default function ClientQuestionnaires() {
                 color="primary"
                 onClick={() => startQuestionnaire(questionnaire.id)}
                 disabled={hasOngoingAttempt || (attempts.length > 0 && remaining_attempts === 0)}
-                fullWidth
               >
                 {getButtonState(!!hasOngoingAttempt, attempts, remaining_attempts)}
               </Button>
