@@ -111,6 +111,7 @@ class QuestionnaireResponse(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id")
     started_at: datetime = Field(default_factory=datetime.now)
     completed_at: Optional[datetime] = None
+    attempt_number: int = Field(default=1)  # Track attempt number per questionnaire
     
     # Relationships
     questionnaire: Questionnaire = Relationship(back_populates="responses")

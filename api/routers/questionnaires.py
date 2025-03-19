@@ -116,112 +116,70 @@ async def create_questionnaire(
     
     return schemas.IdResponse(id=new_questionnaire.id, message="Questionnaire created successfully")
 
-# Get questionnaires for clients with response status
+# Get available questionnaires for the client
 @router.get("/client", response_model=List[schemas.QuestionnaireClientResponse])
 async def get_client_questionnaires(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
-    """Get questionnaires available for the client with response status"""
+    """Get all questionnaires available for the current client"""
     
-    # Get the sessions the client is enrolled in
-    enrolled_sessions_query = text("""
-        SELECT session_id FROM client_session_enrollments
-        WHERE client_id = :client_id
-    """)
-    
-    enrolled_sessions_result = await db.execute(enrolled_sessions_query, {"client_id": current_user.id})
-    enrolled_session_ids = [row[0] for row in enrolled_sessions_result.all()]
-    
-    if not enrolled_session_ids:
-        return []  # If not enrolled in any sessions, return empty list
-    
-    # Get questionnaire IDs that are attached to the client's enrolled sessions
-    questionnaire_instances_query = text("""
-        SELECT questionnaire_id FROM questionnaire_instances
-        WHERE session_id = ANY(:session_ids) AND is_active = TRUE
-    """)
-    
-    questionnaire_instances_result = await db.execute(
-        questionnaire_instances_query, 
-        {"session_ids": enrolled_session_ids}
-    )
-    questionnaire_ids = [row[0] for row in questionnaire_instances_result.all()]
-    
-    if not questionnaire_ids:
-        return []  # If no questionnaires in enrolled sessions, return empty list
-    
-    # Get only questionnaires that are attached to the client's sessions
-    questionnaires_query = text("""
-        SELECT q.*, q.number_of_attempts
-        FROM questionnaires q
-        WHERE q.id = ANY(:questionnaire_ids)
-    """)
-    
-    result = await db.execute(questionnaires_query, {"questionnaire_ids": questionnaire_ids})
-    questionnaires = result.all()
-    
-    # Get all responses for this user
-    responses_query = text("""
-        SELECT * FROM questionnaire_responses
-        WHERE user_id = :user_id
-        AND questionnaire_id = ANY(:questionnaire_ids)
-        ORDER BY started_at DESC
-    """)
-    
-    result = await db.execute(responses_query, {
-        "user_id": current_user.id,
-        "questionnaire_ids": questionnaire_ids
-    })
-    responses = result.all()
-    
-    # Create a map of questionnaire ID to response status and attempts
-    response_map: dict[int, dict[str, Any]] = {}
-    for response in responses:
-        questionnaire_id = response.questionnaire_id
-        if questionnaire_id not in response_map:
-            response_map[questionnaire_id] = {
-                "has_response": True,
-                "is_completed": response.completed_at is not None,
-                "last_updated": response.completed_at or response.started_at,
-                "completed_count": 0,
-                "attempts": []
-            }
-        
-        # Add attempt data
-        response_map[questionnaire_id]["attempts"].append({
-            "id": response.id,
-            "questionnaire_id": response.questionnaire_id,
-            "user_id": response.user_id,
-            "started_at": response.started_at,
-            "completed_at": response.completed_at
-        })
-        
-        if response.completed_at is not None:
-            response_map[questionnaire_id]["completed_count"] += 1
-        
-        if response.completed_at and (
-            not response_map[questionnaire_id].get("last_updated") or 
-            response.completed_at > response_map[questionnaire_id]["last_updated"]
-        ):
-            response_map[questionnaire_id]["last_updated"] = response.completed_at
-    
-    # Build the response
-    return [
-        schemas.QuestionnaireClientResponse(
-            id=q.id,
-            title=q.title,
-            description=q.description,
-            type=try_convert_to_questionnaire_type(q.type),
-            has_response=response_map.get(q.id, {}).get("has_response", False),
-            is_completed=response_map.get(q.id, {}).get("is_completed", False),
-            last_updated=response_map.get(q.id, {}).get("last_updated"),
-            completed_count=response_map.get(q.id, {}).get("completed_count", 0),
-            remaining_attempts=max(0, getattr(q, "number_of_attempts", 1) - response_map.get(q.id, {}).get("completed_count", 0)),
-            attempts=response_map.get(q.id, {}).get("attempts", [])
+    try:
+        # Get all questionnaires
+        result = await db.execute(
+            select(Questionnaire)
+            .where(Questionnaire.type == QuestionnaireType.PRE_TEST)
         )
-        for q in questionnaires
-    ]
+        questionnaires = result.scalars().all()
+        
+        # Get all responses for the current user
+        result = await db.execute(
+            select(QuestionnaireResponse)
+            .where(QuestionnaireResponse.user_id == current_user.id)
+        )
+        user_responses = result.scalars().all()
+        
+        # Group responses by questionnaire
+        responses_by_questionnaire: dict[int, list[QuestionnaireResponse]] = {}
+        for response in user_responses:
+            if response.questionnaire_id not in responses_by_questionnaire:
+                responses_by_questionnaire[response.questionnaire_id] = []
+            responses_by_questionnaire[response.questionnaire_id].append(response)
+        
+        # Create response for each questionnaire
+        return [
+            schemas.QuestionnaireClientResponse(
+                id=questionnaire.id,
+                title=questionnaire.title,
+                description=questionnaire.description,
+                type=questionnaire.type,
+                has_response=questionnaire.id in responses_by_questionnaire,
+                is_completed=any(r.completed_at is not None for r in responses_by_questionnaire.get(questionnaire.id, [])),
+                last_updated=max((r.completed_at or r.started_at for r in responses_by_questionnaire.get(questionnaire.id, [])), default=None),
+                completed_count=sum(1 for r in responses_by_questionnaire.get(questionnaire.id, []) if r.completed_at is not None),
+                remaining_attempts=max(0, questionnaire.number_of_attempts - sum(1 for r in responses_by_questionnaire.get(questionnaire.id, []) if r.completed_at is not None)),
+                attempts=[
+                    schemas.QuestionnaireAttemptResponse(
+                        id=attempt.id,  # type: ignore
+                        questionnaire_id=attempt.questionnaire_id,
+                        user_id=attempt.user_id,
+                        started_at=attempt.started_at,
+                        completed_at=attempt.completed_at,
+                        attempt_number=attempt.attempt_number
+                    )
+                    for attempt in responses_by_questionnaire.get(questionnaire.id, [])
+                ]
+            )
+            for questionnaire in questionnaires
+        ]
+    except Exception as e:
+        import traceback
+        print(f"Error in get_client_questionnaires: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve client questionnaires: {str(e)}"
+        )
 
 # Get all questionnaires
 @router.get("", response_model=List[QuestionnaireResponseSchema])
@@ -675,21 +633,20 @@ async def start_questionnaire(
             is_new_attempt=False
         )
     
-    # Count completed attempts
+    # Get the next attempt number for this questionnaire and user
     result = await db.execute(
-        select(func.count(QuestionnaireResponse.id))
+        select(func.coalesce(func.max(QuestionnaireResponse.attempt_number), 0) + 1)
         .where(
             (QuestionnaireResponse.questionnaire_id == questionnaire_id) &
-            (QuestionnaireResponse.user_id == current_user.id) &
-            (QuestionnaireResponse.completed_at != None)
+            (QuestionnaireResponse.user_id == current_user.id)
         )
     )
-    completed_count = result.scalar_one()
+    next_attempt_number = result.scalar_one()
     
     # Check if user has reached the maximum number of attempts
     # Use getattr with default value in case number_of_attempts is not defined
     number_of_attempts = getattr(questionnaire, "number_of_attempts", 1)
-    if completed_count >= number_of_attempts:
+    if next_attempt_number > number_of_attempts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Maximum number of attempts ({number_of_attempts}) reached"
@@ -698,7 +655,8 @@ async def start_questionnaire(
     # Create new response
     new_response = QuestionnaireResponse(
         questionnaire_id=questionnaire_id,
-        user_id=current_user.id
+        user_id=current_user.id,
+        attempt_number=next_attempt_number
     )
     
     # Add the new response and flush to get the ID without committing
@@ -1091,7 +1049,8 @@ async def get_questionnaire_attempts(
                 questionnaire_id=attempt.questionnaire_id,
                 user_id=attempt.user_id,
                 started_at=attempt.started_at,
-                completed_at=attempt.completed_at
+                completed_at=attempt.completed_at,
+                attempt_number=attempt.attempt_number
             )
             for attempt in attempts
         ]
@@ -1153,6 +1112,7 @@ async def get_questionnaire_response(
         "user_id": questionnaire_response.user_id,
         "started_at": questionnaire_response.started_at,
         "completed_at": questionnaire_response.completed_at,
+        "attempt_number": questionnaire_response.attempt_number,
         "responses": responses
     }
 

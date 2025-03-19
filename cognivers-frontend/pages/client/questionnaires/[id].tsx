@@ -73,6 +73,7 @@ interface ResponseState {
     saved: boolean;
     error: string | null;
     interactionBatchId?: number;
+    question_text?: string;
   };
 }
 
@@ -82,6 +83,7 @@ interface QuestionnaireAttempt {
   user_id: number;
   started_at: string;
   completed_at: string | null;
+  attempt_number: number;
 }
 
 interface AttemptsData {
@@ -240,7 +242,8 @@ const TakeQuestionnaire: React.FC = () => {
                     ...initialResponses[qId],
                     answer: data.answer,
                     saved: true,
-                    interactionBatchId: data.interactionBatchId
+                    interactionBatchId: data.interactionBatchId,
+                    question_text: data.question_text
                   };
                 }
               });
@@ -561,6 +564,11 @@ const TakeQuestionnaire: React.FC = () => {
       return responseState.answer || '';
     };
     
+    // Get the historical question text if in read-only mode
+    const questionText = isReadOnly && responseState.question_text 
+      ? responseState.question_text 
+      : question.text;
+    
     return (
       <Card key={question.id} sx={{ mb: 4, position: 'relative' }}>
         {responseState.saving && (
@@ -571,7 +579,7 @@ const TakeQuestionnaire: React.FC = () => {
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
             <Box>
               <Typography variant="h6" gutterBottom>
-                {question.text}
+                {questionText}
                 {question.is_required && <span style={{ color: 'red' }}> *</span>}
               </Typography>
               
@@ -747,7 +755,7 @@ const TakeQuestionnaire: React.FC = () => {
         {attemptsData && (
           <Box sx={{ mt: 2, mb: 3 }}>
             <Typography variant="h6">
-              Attempts: {attemptsData.completed_count} of {questionnaire?.number_of_attempts}
+              Attempt {attemptsData.attempts[attemptsData.attempts.length - 1]?.attempt_number || 1} of {questionnaire?.number_of_attempts}
             </Typography>
             
             {/* Show button for new attempt if attempts remaining */}

@@ -464,6 +464,7 @@ class QuestionnaireAttemptResponse(BaseResponseModel):
     user_id: int
     started_at: datetime
     completed_at: Optional[datetime] = None
+    attempt_number: int
     responses: Optional[Dict[str, Dict[str, Any]]] = None
 
     class Config(BaseResponseModel.Config):
@@ -471,16 +472,10 @@ class QuestionnaireAttemptResponse(BaseResponseModel):
             "example": {
                 "id": 1,
                 "questionnaire_id": 1,
-                "user_id": 2,
-                "started_at": "2023-03-01T12:00:00",
-                "completed_at": "2023-03-01T12:30:00",
-                "responses": {
-                    "1": {
-                        "answer": {"value": "Sample answer"},
-                        "interactionBatchId": 1,
-                        "question_text": "How would you rate our service?"
-                    }
-                }
+                "user_id": 1,
+                "started_at": "2024-03-19T16:30:47.195869",
+                "completed_at": "2024-03-19T16:31:13.339452",
+                "attempt_number": 1
             }
         }
 
@@ -512,9 +507,9 @@ class QuestionnaireClientResponse(BaseResponseModel):
                     {
                         "id": 1,
                         "questionnaire_id": 1,
-                        "user_id": 2,
-                        "started_at": "2023-03-01T12:00:00",
-                        "completed_at": "2023-03-01T12:30:00"
+                        "user_id": 1,
+                        "started_at": "2024-03-19T16:30:47.195869",
+                        "completed_at": "2024-03-19T16:31:13.339452"
                     }
                 ]
             }
@@ -532,9 +527,9 @@ class QuestionnaireAttemptsResponse(BaseResponseModel):
                     {
                         "id": 1,
                         "questionnaire_id": 1,
-                        "user_id": 2,
-                        "started_at": "2023-03-01T12:00:00",
-                        "completed_at": "2023-03-01T12:30:00"
+                        "user_id": 1,
+                        "started_at": "2024-03-19T16:30:47.195869",
+                        "completed_at": "2024-03-19T16:31:13.339452"
                     }
                 ],
                 "completed_count": 1,
