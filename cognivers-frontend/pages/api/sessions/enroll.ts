@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { callBackendApi } from '../../../lib/api';
-import { getToken } from '../../../lib/auth';
+import { callBackendApi } from '@lib/api';
+import { getToken } from '@lib/auth';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const token = getToken(req);
@@ -22,9 +22,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Call the backend API to enroll in the session by code
     const data = await callBackendApi(
-      `/sessions/enroll?session_code=${session_code}`, 
+      `/sessions/enroll`, 
       'POST', 
-      null, 
+      { session_code }, 
       token
     );
     

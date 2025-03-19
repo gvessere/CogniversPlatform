@@ -1070,15 +1070,23 @@ export async function enrollClientInSession(
   sessionId: number,
   data: ClientSessionEnrollmentCreateData
 ): Promise<ClientSessionEnrollment> {
-  return postData(`/sessions/${sessionId}/enrollments`, data);
+  return postData(`/api/sessions/${sessionId}/enrollments`, data);
 }
 
 export async function getSessionEnrollments(sessionId: number): Promise<ClientSessionEnrollment[]> {
-  return getData(`/sessions/${sessionId}/enrollments`);
+  return getData(`/api/sessions/${sessionId}/enrollments`);
 }
 
 export async function getClientEnrollments(clientId: number): Promise<ClientSessionEnrollment[]> {
   return getData(`/api/sessions/client/${clientId}/enrollments`);
+}
+
+export async function getEnrollment(sessionId: number, clientId: number): Promise<ClientSessionEnrollment> {
+  return getData(`/api/sessions/${sessionId}/enrollments/${clientId}`);
+}
+
+export async function unenrollFromSession(clientId: number, sessionId: number): Promise<void> {
+  return deleteData(`/api/sessions/${sessionId}/enrollments/${clientId}`);
 }
 
 /**

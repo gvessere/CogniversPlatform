@@ -149,55 +149,6 @@ async def get_trainer_clients(
         for client in clients
     ]
 
-@router.delete("/clients/{client_id}/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def unenroll_client_from_session(
-    client_id: int,
-    session_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_session)
-):
-    """Unenroll a client from a session"""
-    if current_user.role != UserRole.TRAINER and current_user.role != UserRole.ADMINISTRATOR:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers can unenroll clients from sessions"
-        )
-    
-    # Verify the session belongs to the trainer
-    session_query = select(SessionModel).where(
-        and_(
-            SessionModel.id == session_id,
-            SessionModel.trainer_id == current_user.id
-        )
-    )
-    session_result = await db.execute(session_query)
-    session = session_result.scalar_one_or_none()
-    
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found or not authorized"
-        )
-    
-    # Find and delete the enrollment
-    enrollment_query = select(ClientSessionEnrollment).where(
-        and_(
-            ClientSessionEnrollment.client_id == client_id,
-            ClientSessionEnrollment.session_id == session_id
-        )
-    )
-    enrollment_result = await db.execute(enrollment_query)
-    enrollment = enrollment_result.scalar_one_or_none()
-    
-    if not enrollment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Client is not enrolled in this session"
-        )
-    
-    await db.delete(enrollment)
-    await db.commit()
-
 @router.post("/create", response_model=UserResponse)
 async def create_user(
     user_data: UserCreate,

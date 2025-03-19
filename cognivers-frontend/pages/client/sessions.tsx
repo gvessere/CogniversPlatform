@@ -18,16 +18,22 @@ import {
   Paper,
   IconButton,
   Tooltip,
-  Collapse
+  Collapse,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
 } from '@mui/material';
 import { useRouter } from 'next/router';
 import { format } from 'date-fns';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import InfoIcon from '@mui/icons-material/Info';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import { useAuth } from '../../context/AuthContext';
 import { 
   enroll,
-  getClientEnrollments 
+  getClientEnrollments,
+  unenrollFromSession
 } from '../../lib/api';
 import { ClientSessionEnrollment } from '../../lib/types';
 import { withNavigationLayout } from '../../utils/layout';
@@ -43,6 +49,8 @@ export default function ClientSessionsPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showHelp, setShowHelp] = useState(false);
+  const [unenrollDialogOpen, setUnenrollDialogOpen] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<ClientSessionEnrollment | null>(null);
 
   // Fetch enrolled sessions
   useEffect(() => {
@@ -126,6 +134,34 @@ export default function ClientSessionsPage() {
 
   const toggleHelp = () => {
     setShowHelp(!showHelp);
+  };
+
+  const handleUnenrollClick = (session: ClientSessionEnrollment) => {
+    setSelectedSession(session);
+    setUnenrollDialogOpen(true);
+  };
+
+  const handleUnenrollConfirm = async () => {
+    if (!selectedSession || !user) return;
+
+    try {
+      await unenrollFromSession(user.id, selectedSession.session_id);
+      setSuccess('Successfully unenrolled from session');
+      // Refresh enrolled sessions
+      const enrolledData = await getClientEnrollments(user.id);
+      setEnrolledSessions(enrolledData);
+    } catch (err: any) {
+      console.error('Error unenrolling from session:', err);
+      setError(err.message || 'Failed to unenroll from session');
+    } finally {
+      setUnenrollDialogOpen(false);
+      setSelectedSession(null);
+    }
+  };
+
+  const handleUnenrollCancel = () => {
+    setUnenrollDialogOpen(false);
+    setSelectedSession(null);
   };
 
   return (
@@ -216,9 +252,19 @@ export default function ClientSessionsPage() {
                             size="small" 
                             variant="contained"
                             onClick={() => handleViewSession(enrollment.session_id)}
+                            sx={{ mr: 1 }}
                           >
                             View Session
                           </Button>
+                          <Tooltip title="Unenroll from session">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleUnenrollClick(enrollment)}
+                              color="error"
+                            >
+                              <ExitToAppIcon />
+                            </IconButton>
+                          </Tooltip>
                         </CardActions>
                       </Card>
                     </Grid>
@@ -270,6 +316,25 @@ export default function ClientSessionsPage() {
           )}
         </>
       )}
+
+      {/* Unenroll Confirmation Dialog */}
+      <Dialog
+        open={unenrollDialogOpen}
+        onClose={handleUnenrollCancel}
+      >
+        <DialogTitle>Confirm Unenroll</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to unenroll from the session "{selectedSession?.session_title}"?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleUnenrollCancel}>Cancel</Button>
+          <Button onClick={handleUnenrollConfirm} color="error" variant="contained">
+            Unenroll
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }
