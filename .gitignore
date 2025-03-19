@@ -1,3 +1,7 @@
+# pyc files
+**/*.pyc
+
+
 # Age encryption keys
 .sops/keys.txt
 
