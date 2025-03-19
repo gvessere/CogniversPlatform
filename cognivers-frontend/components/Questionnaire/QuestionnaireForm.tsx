@@ -609,10 +609,22 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({
                   <FormHelperText>{validationErrors.type}</FormHelperText>
                 )}
               </FormControl>
+              <TextField
+                fullWidth
+                label="Number of Attempts"
+                name="number_of_attempts"
+                type="number"
+                value={formState.number_of_attempts}
+                onChange={handleInputChange}
+                inputProps={{ min: 1 }}
+                error={!!validationErrors.number_of_attempts}
+                helperText={validationErrors.number_of_attempts}
+                sx={{ mt: 2 }}
+              />
             </Grid>
             
             <Grid item xs={12} md={6}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center' }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'center', gap: 2 }}>
                 <FormControlLabel
                   control={
                     <Switch
@@ -632,17 +644,6 @@ const QuestionnaireForm: React.FC<QuestionnaireFormProps> = ({
                     />
                   }
                   label="Require completion of all required questions"
-                />
-                <TextField
-                  fullWidth
-                  label="Number of Attempts"
-                  name="number_of_attempts"
-                  type="number"
-                  value={formState.number_of_attempts}
-                  onChange={handleInputChange}
-                  inputProps={{ min: 1 }}
-                  error={!!validationErrors.number_of_attempts}
-                  helperText={validationErrors.number_of_attempts}
                 />
               </Box>
             </Grid>
