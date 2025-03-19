@@ -125,12 +125,18 @@ async def get_client_questionnaires(
     """Get all questionnaires available for the current client"""
     
     try:
-        # Get all questionnaires
-        result = await db.execute(
-            select(Questionnaire)
-            .where(Questionnaire.type == QuestionnaireType.PRE_TEST)
-        )
-        questionnaires = result.scalars().all()
+        # Get all questionnaires from active instances in the client's enrolled sessions
+        query = text("""
+            SELECT DISTINCT q.*
+            FROM questionnaires q
+            JOIN questionnaire_instances qi ON q.id = qi.questionnaire_id
+            JOIN client_session_enrollments cse ON qi.session_id = cse.session_id
+            WHERE cse.client_id = :client_id
+            AND qi.is_active = true
+        """)
+        
+        result = await db.execute(query, {"client_id": current_user.id})
+        questionnaires = result.all()
         
         # Get all responses for the current user
         result = await db.execute(
@@ -152,7 +158,7 @@ async def get_client_questionnaires(
                 id=questionnaire.id,
                 title=questionnaire.title,
                 description=questionnaire.description,
-                type=questionnaire.type,
+                type=questionnaire.type.lower(),  # Convert to lowercase
                 has_response=questionnaire.id in responses_by_questionnaire,
                 is_completed=any(r.completed_at is not None for r in responses_by_questionnaire.get(questionnaire.id, [])),
                 last_updated=max((r.completed_at or r.started_at for r in responses_by_questionnaire.get(questionnaire.id, [])), default=None),
