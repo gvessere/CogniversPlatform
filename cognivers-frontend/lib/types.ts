@@ -180,4 +180,44 @@ export enum SessionStatus {
   ACTIVE = "active",
   COMPLETED = "completed",
   CANCELLED = "cancelled"
+}
+
+// Processor related types
+export interface Processor {
+  id: number;
+  name: string;
+  description: string;
+  prompt_template: string;
+  post_processing_code?: string;
+  interpreter: 'python' | 'javascript' | 'none';
+  status: 'active' | 'inactive' | 'testing';
+  created_at: string;
+  updated_at: string;
+  created_by_id: number;
+  llm_model?: string;
+  llm_temperature?: number;
+  llm_max_tokens?: number;
+  llm_stop_sequences?: string[];
+  llm_system_prompt?: string;
+}
+
+export interface ProcessingResult {
+  id: number;
+  questionnaire_response_id: number;
+  processor_id: number;
+  processor_version: string;
+  raw_output: string;
+  processed_output?: Record<string, any>;
+  status: 'completed' | 'failed' | 'processing';
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QuestionnaireProcessorMapping {
+  id: number;
+  questionnaire_id: number;
+  processor_id: number;
+  is_active: boolean;
+  created_at: string;
 } 

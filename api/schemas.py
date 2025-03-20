@@ -647,6 +647,11 @@ class ProcessorBase(BaseModel):
     prompt_template: str
     post_processing_code: Optional[str] = None
     interpreter: str = "none"  # python, javascript, none
+    llm_model: Optional[str] = None
+    llm_temperature: Optional[float] = 0.7
+    llm_max_tokens: Optional[int] = 2000
+    llm_stop_sequences: Optional[List[str]] = None
+    llm_system_prompt: Optional[str] = None
 
 class ProcessorCreate(ProcessorBase):
     status: str = "testing"  # active, inactive, testing
@@ -659,7 +664,12 @@ class ProcessorCreate(ProcessorBase):
                 "prompt_template": "Analyze the sentiment in the following responses: {{questions}}",
                 "post_processing_code": "# Python code to process output\nimport json\ndata = json.loads(input())\nprint(json.dumps({'sentiment': 'positive'}))",
                 "interpreter": "python",
-                "status": "testing"
+                "status": "testing",
+                "llm_model": "gpt-4",
+                "llm_temperature": 0.7,
+                "llm_max_tokens": 2000,
+                "llm_stop_sequences": ["\n\n", "END"],
+                "llm_system_prompt": "You are a sentiment analysis expert. Analyze the following responses and provide a sentiment score."
             }
         }
 
@@ -670,12 +680,18 @@ class ProcessorUpdate(BaseModel):
     post_processing_code: Optional[str] = None
     interpreter: Optional[str] = None
     status: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_temperature: Optional[float] = None
+    llm_max_tokens: Optional[int] = None
+    llm_stop_sequences: Optional[List[str]] = None
+    llm_system_prompt: Optional[str] = None
 
     class Config:
         json_schema_extra = {
             "example": {
                 "status": "active",
-                "prompt_template": "Updated prompt template"
+                "prompt_template": "Updated prompt template",
+                "llm_temperature": 0.5
             }
         }
 
@@ -698,7 +714,12 @@ class ProcessorResponse(ProcessorBase, BaseResponseModel):
                 "status": "active",
                 "created_at": "2023-01-01T12:00:00",
                 "updated_at": "2023-01-01T12:00:00",
-                "created_by_id": 1
+                "created_by_id": 1,
+                "llm_model": "gpt-4",
+                "llm_temperature": 0.7,
+                "llm_max_tokens": 2000,
+                "llm_stop_sequences": ["\n\n", "END"],
+                "llm_system_prompt": "You are a sentiment analysis expert. Analyze the following responses and provide a sentiment score."
             }
         }
 

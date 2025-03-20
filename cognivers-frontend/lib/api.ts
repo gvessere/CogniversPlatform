@@ -14,7 +14,10 @@ import {
   QuestionnaireInstanceCreateData,
   QuestionnaireInstanceUpdateData,
   ClientSessionEnrollment,
-  ClientSessionEnrollmentCreateData
+  ClientSessionEnrollmentCreateData,
+  Processor,
+  QuestionnaireProcessorMapping,
+  ProcessingResult
 } from './types';
 
 /**
@@ -1197,6 +1200,43 @@ export const getQuestionnaireResponses = async (questionnaireId: number, respons
     // Use handleApiError for consistent error handling
     handleApiError(error);
   }
+};
+
+// Processor API functions
+export const getProcessors = async (): Promise<Processor[]> => {
+  return getData('/api/processors');
+};
+
+export const getProcessor = async (id: number): Promise<Processor> => {
+  return getData(`/api/processors/${id}`);
+};
+
+export const createProcessor = async (data: Omit<Processor, 'id' | 'created_at' | 'updated_at' | 'created_by_id'>): Promise<Processor> => {
+  return postData('/api/processors', data);
+};
+
+export const updateProcessor = async (id: number, data: Partial<Processor>): Promise<Processor> => {
+  return patchData(`/api/processors/${id}`, data);
+};
+
+export const deleteProcessor = async (id: number): Promise<void> => {
+  return deleteData(`/api/processors/${id}`);
+};
+
+export const assignProcessor = async (processorId: number, questionnaireId: number, isActive: boolean = true): Promise<QuestionnaireProcessorMapping> => {
+  return postData(`/api/processors/${processorId}/assign`, { questionnaire_id: questionnaireId, is_active: isActive });
+};
+
+export const removeProcessor = async (processorId: number, questionnaireId: number): Promise<void> => {
+  return deleteData(`/api/processors/${processorId}/assign/${questionnaireId}`);
+};
+
+export const getProcessingResults = async (responseId: number): Promise<ProcessingResult[]> => {
+  return getData(`/api/processors/results/response/${responseId}`);
+};
+
+export const requeueProcessing = async (responseId: number, processorId?: number): Promise<void> => {
+  return postData(`/api/processors/requeue/${responseId}`, { processor_id: processorId });
 };
 
 // No longer exporting any axios instances

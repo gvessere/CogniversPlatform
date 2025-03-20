@@ -32,6 +32,13 @@ class Processor(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.now)
     created_by_id: int = Field(foreign_key="user.id")
     
+    # LLM Configuration
+    llm_model: Optional[str] = Field(default=None)  # e.g., "gpt-4", "claude-3-opus"
+    llm_temperature: Optional[float] = Field(default=0.7)
+    llm_max_tokens: Optional[int] = Field(default=2000)
+    llm_stop_sequences: Optional[List[str]] = Field(sa_column=Column(JSON), default=None)
+    llm_system_prompt: Optional[str] = Field(sa_column=Column(Text), default=None)
+    
     # Relationships
     questionnaires: List["QuestionnaireProcessorMapping"] = Relationship(back_populates="processor")
     results: List["ProcessingResult"] = Relationship(back_populates="processor")

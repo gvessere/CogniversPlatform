@@ -20,6 +20,7 @@ import FitnessCenterIcon from '@mui/icons-material/FitnessCenter';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import QuizIcon from '@mui/icons-material/Quiz';
 import AssignmentIcon from '@mui/icons-material/Assignment';
+import AutoGraphIcon from '@mui/icons-material/AutoGraph';
 import { useAuth } from '../context/AuthContext';
 import { hasRole } from '../lib/auth';
 import { User, UserRole } from '../lib/types';
@@ -102,6 +103,12 @@ const adminItems: NavigationItem[] = [
     text: 'Questionnaire Management',
     icon: <QuizIcon color="primary" />,
     path: '/admin/questionnaires',
+    roles: [UserRole.ADMINISTRATOR]
+  },
+  {
+    text: 'LLM Processors',
+    icon: <AutoGraphIcon color="primary" />,
+    path: '/admin/processors',
     roles: [UserRole.ADMINISTRATOR]
   }
 ];
