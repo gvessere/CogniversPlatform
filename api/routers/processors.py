@@ -6,10 +6,10 @@ from datetime import datetime
 
 from database import get_async_session
 from models.processors import (
-    Processor, QuestionnaireProcessorMapping, ProcessingResult,
-    ProcessorStatus, InterpreterType
+    Processor, QuestionnaireProcessorMapping, QuestionProcessorMapping,
+    ProcessingResult, ProcessorStatus, InterpreterType
 )
-from models.questionnaire import Questionnaire, QuestionnaireResponse
+from models.questionnaire import Questionnaire, QuestionnaireResponse, Question
 from models.user import User, UserRole
 from auth.dependencies import get_current_user
 from tasks import process_questionnaire_response, requeue_processing
@@ -191,11 +191,11 @@ async def delete_processor(
     
     return schemas.MessageResponse(message="Processor deleted successfully")
 
-# Assign processor to questionnaire
-@router.post("/{processor_id}/assign", response_model=schemas.QuestionnaireProcessorMappingResponse)
+# Assign processor to questions
+@router.post("/{processor_id}/assign", response_model=List[schemas.QuestionProcessorMappingResponse])
 async def assign_processor(
     processor_id: int,
-    mapping_data: schemas.QuestionnaireProcessorMappingCreate,
+    mapping_data: schemas.QuestionProcessorMappingCreate,
     current_user: User = Depends(check_admin),
     db: AsyncSession = Depends(get_async_session)
 ):
@@ -225,51 +225,66 @@ async def assign_processor(
             detail="Questionnaire not found"
         )
     
-    # Check if mapping already exists
+    # Check if all questions exist and belong to the questionnaire
     result = await db.execute(
-        select(QuestionnaireProcessorMapping)
+        select(Question)
         .where(
-            (QuestionnaireProcessorMapping.processor_id == processor_id) &
-            (QuestionnaireProcessorMapping.questionnaire_id == mapping_data.questionnaire_id)
+            (Question.id.in_(mapping_data.question_ids)) &
+            (Question.questionnaire_id == mapping_data.questionnaire_id)
         )
     )
-    existing_mapping = result.scalar_one_or_none()
+    questions = result.scalars().all()
     
-    if existing_mapping:
-        # Update existing mapping
-        existing_mapping.is_active = mapping_data.is_active
-        await db.commit()
+    if len(questions) != len(mapping_data.question_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="One or more questions not found or do not belong to the questionnaire"
+        )
+    
+    # Create new mappings
+    new_mappings = []
+    for question_id in mapping_data.question_ids:
+        # Check if mapping already exists
+        result = await db.execute(
+            select(QuestionProcessorMapping)
+            .where(
+                (QuestionProcessorMapping.processor_id == processor_id) &
+                (QuestionProcessorMapping.question_id == question_id)
+            )
+        )
+        existing_mapping = result.scalar_one_or_none()
         
-        # Return the mapping object directly
-        return existing_mapping
+        if existing_mapping:
+            # Update existing mapping
+            existing_mapping.is_active = mapping_data.is_active
+            new_mappings.append(existing_mapping)
+        else:
+            # Create new mapping
+            new_mapping = QuestionProcessorMapping(
+                processor_id=processor_id,
+                question_id=question_id,
+                is_active=mapping_data.is_active
+            )
+            db.add(new_mapping)
+            new_mappings.append(new_mapping)
     
-    # Create new mapping
-    new_mapping = QuestionnaireProcessorMapping(
-        processor_id=processor_id,
-        questionnaire_id=mapping_data.questionnaire_id,
-        is_active=mapping_data.is_active
-    )
-    
-    db.add(new_mapping)
     await db.commit()
-    
-    # Return the mapping object directly
-    return new_mapping
+    return new_mappings
 
-# Remove processor from questionnaire
-@router.delete("/{processor_id}/assign/{questionnaire_id}", response_model=schemas.MessageResponse)
+# Remove processor from questions
+@router.delete("/{processor_id}/assign/{question_id}", response_model=schemas.MessageResponse)
 async def remove_processor(
     processor_id: int,
-    questionnaire_id: int,
+    question_id: int,
     current_user: User = Depends(check_admin),
     db: AsyncSession = Depends(get_async_session)
 ):
     # Check if mapping exists
     result = await db.execute(
-        select(QuestionnaireProcessorMapping)
+        select(QuestionProcessorMapping)
         .where(
-            (QuestionnaireProcessorMapping.processor_id == processor_id) &
-            (QuestionnaireProcessorMapping.questionnaire_id == questionnaire_id)
+            (QuestionProcessorMapping.processor_id == processor_id) &
+            (QuestionProcessorMapping.question_id == question_id)
         )
     )
     mapping = result.scalar_one_or_none()
@@ -277,14 +292,14 @@ async def remove_processor(
     if not mapping:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Processor is not assigned to this questionnaire"
+            detail="Processor is not assigned to this question"
         )
     
     # Delete mapping
     await db.delete(mapping)
     await db.commit()
     
-    return schemas.MessageResponse(message="Processor removed from questionnaire successfully")
+    return schemas.MessageResponse(message="Processor removed from question successfully")
 
 # Get results for a questionnaire response
 @router.get("/results/response/{response_id}", response_model=List[schemas.ProcessingResultResponse])

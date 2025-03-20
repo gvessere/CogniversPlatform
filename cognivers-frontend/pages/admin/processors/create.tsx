@@ -149,14 +149,22 @@ function CreateProcessor() {
                 multiline
                 rows={4}
                 required
-                helperText="Main template for generating prompts. Available variables:
-                • {{question_text}} - The text of the question
-                • {{answer}} - The user's answer to the question
-                • {{question_type}} - The type of question (text, multiple_choice_single, multiple_choice_multiple)
-                • {{question_configuration}} - The question's configuration (choices, etc.)
-                • {{started_at}} - When the response was started
-                • {{completed_at}} - When the response was completed
-                • {{attempt_number}} - The attempt number for this response"
+                helperText="Main template for generating prompts. Uses Jinja2 syntax. Available variables:
+                • questions: List of question objects, each containing:
+                  - id: Question ID
+                  - text: Question text
+                  - type: Question type
+                  - answer: User's answer
+                  - index: 1-based index in the batch
+                • questionnaire_id: ID of the questionnaire
+                • user_id: ID of the user who submitted the response
+                
+                Example template:
+                {% for question in questions %}
+                Question #{{ question.index }}
+                {{ question.text }}
+                Answer: {{ question.answer }}
+                {% endfor %}"
               />
             </Grid>
 

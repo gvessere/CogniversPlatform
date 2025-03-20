@@ -17,4 +17,4 @@ to see the logs, make sure to pause and ask me to cause the error. and then you 
 
 Before starting work with modifications, please show me an implementation plan that demonstrates that you are following the rules I layed down above, especially I want to constantly see some effort being done towards uniformization, simplication, refactoring and improvement of the code base as we progress through implementing more features.
 
-the migrations should be under the api subfolder at api/migrations
+the migrations should be under the api subfolder at api/alembic. make sure to read the README at api/alembic before running migrations

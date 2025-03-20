@@ -5,7 +5,7 @@ from sqlalchemy import Column, JSON, Text, Enum as SQLEnum
 from enum import Enum
 
 if TYPE_CHECKING:
-    from models.questionnaire import QuestionnaireResponse, Questionnaire
+    from models.questionnaire import QuestionnaireResponse, Questionnaire, Question
 
 class ProcessorStatus(str, Enum):
     ACTIVE = "active"
@@ -13,9 +13,9 @@ class ProcessorStatus(str, Enum):
     TESTING = "testing"
 
 class InterpreterType(str, Enum):
+    NONE = "none"
     PYTHON = "python"
     JAVASCRIPT = "javascript"
-    NONE = "none"
 
 class Processor(SQLModel, table=True):
     """Admin-defined processor configuration"""
@@ -24,7 +24,25 @@ class Processor(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     description: str
-    prompt_template: str = Field(sa_column=Column(Text))
+    prompt_template: str = Field(
+        sa_column=Column(Text),
+        description="""
+        Prompt template using Jinja2 syntax. Available variables:
+        - questions: List of question objects, each containing:
+          - id: Question ID
+          - text: Question text
+          - type: Question type
+          - answer: User's answer
+          - index: 1-based index in the batch
+        
+        Example template:
+        {% for question in questions %}
+        Question #{{ question.index }}
+        {{ question.text }}
+        Answer: {{ question.answer }}
+        {% endfor %}
+        """
+    )
     post_processing_code: Optional[str] = Field(sa_column=Column(Text), default=None)
     interpreter: InterpreterType = Field(sa_column=Column(SQLEnum(InterpreterType)), default=InterpreterType.NONE)
     status: ProcessorStatus = Field(sa_column=Column(SQLEnum(ProcessorStatus)), default=ProcessorStatus.TESTING)
@@ -41,6 +59,7 @@ class Processor(SQLModel, table=True):
     
     # Relationships
     questionnaires: List["QuestionnaireProcessorMapping"] = Relationship(back_populates="processor")
+    questions: List["QuestionProcessorMapping"] = Relationship(back_populates="processor")
     results: List["ProcessingResult"] = Relationship(back_populates="processor")
 
 class QuestionnaireProcessorMapping(SQLModel, table=True):
@@ -57,6 +76,21 @@ class QuestionnaireProcessorMapping(SQLModel, table=True):
     questionnaire: "Questionnaire" = Relationship(back_populates="processors")
     processor: Processor = Relationship(back_populates="questionnaires")
 
+class QuestionProcessorMapping(SQLModel, table=True):
+    """Mapping between questions and processors"""
+    __tablename__ = "question_processor_mappings"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    question_id: int = Field(foreign_key="questions.id")
+    processor_id: int = Field(foreign_key="processors.id")
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    
+    # Relationships
+    question: "Question" = Relationship(back_populates="processors")
+    processor: Processor = Relationship(back_populates="questions")
+
 class ProcessingResult(SQLModel, table=True):
     """Results of processing on questionnaire responses"""
     __tablename__ = "processing_results"
@@ -71,6 +105,10 @@ class ProcessingResult(SQLModel, table=True):
     error_message: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
+    
+    # New fields for batch processing
+    question_ids: List[int] = Field(sa_column=Column(JSON), default=[])  # List of question IDs processed in this batch
+    batch_index: Optional[int] = Field(default=None)  # Index of this result in the batch sequence
     
     # Relationships
     questionnaire_response: "QuestionnaireResponse" = Relationship(back_populates="processing_results")

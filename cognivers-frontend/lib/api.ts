@@ -17,7 +17,8 @@ import {
   ClientSessionEnrollmentCreateData,
   Processor,
   QuestionnaireProcessorMapping,
-  ProcessingResult
+  ProcessingResult,
+  QuestionProcessorMapping
 } from './types';
 
 /**
@@ -1223,12 +1224,21 @@ export const deleteProcessor = async (id: number): Promise<void> => {
   return deleteData(`/api/processors/${id}`);
 };
 
-export const assignProcessor = async (processorId: number, questionnaireId: number, isActive: boolean = true): Promise<QuestionnaireProcessorMapping> => {
-  return postData(`/api/processors/${processorId}/assign`, { questionnaire_id: questionnaireId, is_active: isActive });
+export const assignProcessor = async (
+  processorId: number,
+  questionnaireId: number,
+  questionIds: number[],
+  isActive: boolean = true
+): Promise<QuestionProcessorMapping[]> => {
+  return postData(`/api/processors/${processorId}/assign`, {
+    questionnaire_id: questionnaireId,
+    question_ids: questionIds,
+    is_active: isActive
+  });
 };
 
-export const removeProcessor = async (processorId: number, questionnaireId: number): Promise<void> => {
-  return deleteData(`/api/processors/${processorId}/assign/${questionnaireId}`);
+export const removeProcessor = async (processorId: number, questionId: number): Promise<void> => {
+  return deleteData(`/api/processors/${processorId}/assign/${questionId}`);
 };
 
 export const getProcessingResults = async (responseId: number): Promise<ProcessingResult[]> => {

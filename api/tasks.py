@@ -11,6 +11,7 @@ from database import AsyncSessionLocal
 from models.questionnaire import QuestionnaireResponse, QuestionResponse, Question
 from models.processors import Processor, ProcessingResult, InterpreterType
 from datetime import datetime
+from jinja2 import Template
 
 logger = logging.getLogger(__name__)
 
@@ -48,19 +49,19 @@ def process_questionnaire_response(self, response_id: int) -> Dict[str, Any]:
             # Get the questionnaire
             questionnaire_id = questionnaire_response.questionnaire_id
             
-            # Get all processors assigned to this questionnaire
+            # Get all questions with their assigned processors
             result = await session.execute(
-                select(Processor)
-                .join(Processor.questionnaires)
+                select(Question)
+                .join(Question.processors)
                 .where(
-                    (Processor.questionnaires.any(questionnaire_id=questionnaire_id)) &
-                    (Processor.status == "active")
+                    (Question.questionnaire_id == questionnaire_id) &
+                    (QuestionProcessorMapping.is_active == True)
                 )
             )
-            processors = result.scalars().all()
+            questions_with_processors = result.scalars().all()
             
-            if not processors:
-                logger.info(f"No active processors assigned to questionnaire {questionnaire_id}")
+            if not questions_with_processors:
+                logger.info(f"No active processors assigned to questions in questionnaire {questionnaire_id}")
                 return {"message": "No processors assigned"}
             
             # Get all question responses
@@ -71,29 +72,38 @@ def process_questionnaire_response(self, response_id: int) -> Dict[str, Any]:
             )
             question_responses = result.scalars().all()
             
-            # Process with each processor
-            for processor in processors:
+            # Group questions by processor
+            processor_questions = {}
+            for question in questions_with_processors:
+                for processor in question.processors:
+                    if processor.id not in processor_questions:
+                        processor_questions[processor.id] = []
+                    processor_questions[processor.id].append(question)
+            
+            # Process each group of questions with their assigned processor
+            for processor_id, questions in processor_questions.items():
                 # Check if already processed by this processor
                 result = await session.execute(
                     select(ProcessingResult)
                     .where(
                         (ProcessingResult.questionnaire_response_id == response_id) &
-                        (ProcessingResult.processor_id == processor.id)
+                        (ProcessingResult.processor_id == processor_id)
                     )
                 )
                 existing_result = result.scalar_one_or_none()
                 
                 if existing_result and existing_result.status == "completed":
-                    logger.info(f"Response {response_id} already processed by processor {processor.id}")
+                    logger.info(f"Response {response_id} already processed by processor {processor_id}")
                     continue
                 
                 # Create or update processing result
                 if not existing_result:
                     processing_result = ProcessingResult(
                         questionnaire_response_id=response_id,
-                        processor_id=processor.id,
+                        processor_id=processor_id,
                         processor_version="deepseek-r1@v0.1",  # TODO: Make configurable
-                        status="processing"
+                        status="processing",
+                        question_ids=[q.id for q in questions]
                     )
                     session.add(processing_result)
                     await session.flush()
@@ -102,6 +112,7 @@ def process_questionnaire_response(self, response_id: int) -> Dict[str, Any]:
                     processing_result = existing_result
                     processing_result.status = "processing"
                     processing_result.updated_at = datetime.now()
+                    processing_result.question_ids = [q.id for q in questions]
                     result_id = processing_result.id
                 
                 await session.commit()
@@ -109,7 +120,7 @@ def process_questionnaire_response(self, response_id: int) -> Dict[str, Any]:
                 # Queue the actual processing in a separate task
                 execute_processor.delay(result_id)
             
-            return {"message": f"Queued processing with {len(processors)} processors"}
+            return {"message": f"Queued processing with {len(questions_with_processors)} questions"}
     
     # Run the async function
     import asyncio
@@ -162,65 +173,79 @@ def execute_processor(self, result_id: int) -> Dict[str, Any]:
                 await session.commit()
                 return {"error": "Questionnaire response not found"}
             
-            # Get all question responses
+            # Get all questions and their responses for this batch
             result = await session.execute(
                 select(QuestionResponse)
-                .where(QuestionResponse.questionnaire_response_id == processing_result.questionnaire_response_id)
+                .where(
+                    (QuestionResponse.questionnaire_response_id == processing_result.questionnaire_response_id) &
+                    (QuestionResponse.question_id.in_(processing_result.question_ids))
+                )
                 .join(Question)
+                .order_by(QuestionResponse.question_id)
             )
             question_responses = result.scalars().all()
+            
+            if not question_responses:
+                logger.error(f"No question responses found for questions {processing_result.question_ids}")
+                processing_result.status = "failed"
+                processing_result.error_message = "No question responses found"
+                await session.commit()
+                return {"error": "No question responses found"}
             
             try:
                 # Prepare the data for the processor
                 questions_data = []
-                for qr in question_responses:
+                for idx, qr in enumerate(question_responses, 1):
                     questions_data.append({
-                        "question_id": qr.question_id,
-                        "question_text": qr.question.text,
-                        "question_type": qr.question.type,
-                        "answer": qr.answer
+                        "id": qr.question_id,
+                        "text": qr.question.text,
+                        "type": qr.question.type,
+                        "answer": qr.answer,
+                        "index": idx
                     })
                 
-                # Format the prompt with the questionnaire data
-                prompt_data = {
+                # Prepare template context
+                template_context = {
+                    "questions": questions_data,
                     "questionnaire_id": questionnaire_response.questionnaire_id,
-                    "user_id": questionnaire_response.user_id,
-                    "questions": questions_data
+                    "user_id": questionnaire_response.user_id
                 }
+                
+                # Format the prompt with the questions data using Jinja2
+                template = Template(processor.prompt_template)
+                prompt = template.render(**template_context)
                 
                 # TODO: Call the actual API with the prompt
                 # This is a placeholder for the actual API call
-                output = f"Sample output for processor {processor.id} on response {processing_result.questionnaire_response_id}"
+                output = f"Sample output for processor {processor.id} on questions {[q['id'] for q in questions_data]}"
                 
                 # Store the raw output
                 processing_result.raw_output = output
                 
-                # Apply post-processing if configured
-                if processor.post_processing_code and processor.interpreter != InterpreterType.NONE:
-                    processed_output = execute_post_processing(
-                        processor.interpreter,
-                        processor.post_processing_code,
-                        output,
-                        prompt_data
-                    )
-                    processing_result.processed_output = processed_output
+                # Process the output if there's post-processing code
+                if processor.post_processing_code:
+                    try:
+                        # TODO: Implement post-processing logic
+                        processed_output = {"processed": output}
+                        processing_result.processed_output = processed_output
+                    except Exception as e:
+                        logger.error(f"Error in post-processing: {str(e)}")
+                        processing_result.status = "failed"
+                        processing_result.error_message = f"Post-processing error: {str(e)}"
+                        await session.commit()
+                        return {"error": "Post-processing failed"}
                 
-                # Mark as completed
                 processing_result.status = "completed"
-                processing_result.updated_at = datetime.now()
+                await session.commit()
+                
+                return {"message": "Processing completed successfully"}
                 
             except Exception as e:
-                logger.exception(f"Error processing result {result_id}: {str(e)}")
+                logger.error(f"Error processing question: {str(e)}")
                 processing_result.status = "failed"
                 processing_result.error_message = str(e)
-                processing_result.updated_at = datetime.now()
-            
-            await session.commit()
-            
-            return {
-                "result_id": result_id,
-                "status": processing_result.status
-            }
+                await session.commit()
+                return {"error": str(e)}
     
     # Run the async function
     import asyncio

@@ -723,35 +723,37 @@ class ProcessorResponse(ProcessorBase, BaseResponseModel):
             }
         }
 
-class QuestionnaireProcessorMappingCreate(BaseModel):
+class QuestionProcessorMappingCreate(BaseModel):
     questionnaire_id: int
-    processor_id: int
+    question_ids: List[int]
     is_active: bool = True
 
     class Config:
         json_schema_extra = {
             "example": {
                 "questionnaire_id": 1,
-                "processor_id": 1,
+                "question_ids": [1, 2, 3],
                 "is_active": True
             }
         }
 
-class QuestionnaireProcessorMappingResponse(BaseResponseModel):
+class QuestionProcessorMappingResponse(BaseResponseModel):
     id: int
-    questionnaire_id: int
+    question_id: int
     processor_id: int
     is_active: bool
     created_at: datetime
+    updated_at: datetime
 
     class Config(BaseResponseModel.Config):
         json_schema_extra = {
             "example": {
                 "id": 1,
-                "questionnaire_id": 1,
+                "question_id": 1,
                 "processor_id": 1,
                 "is_active": True,
-                "created_at": "2023-01-01T12:00:00"
+                "created_at": "2023-01-01T12:00:00",
+                "updated_at": "2023-01-01T12:00:00"
             }
         }
 

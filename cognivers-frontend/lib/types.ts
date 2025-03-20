@@ -43,20 +43,33 @@ export interface UserUpdateData {
 // Questionnaire related types
 export interface Question {
   id: number;
-  question_text: string;
-  question_type: 'TEXT' | 'MULTIPLE_CHOICE' | 'SINGLE_CHOICE' | 'SCALE' | 'DATE';
-  options?: string[];
-  is_required: boolean;
+  text: string;
+  type: string;
   order: number;
+  is_required: boolean;
+  time_limit_seconds: number | null;
+  configuration: {
+    answer_box_size: string;
+    choices: string[];
+    min_choices?: number | null;
+    max_choices?: number | null;
+  };
+  page_number: number;
+  processors?: QuestionProcessorMapping[];
 }
 
 export interface Questionnaire {
   id: number;
   title: string;
   description: string;
-  created_by: number;
+  type: string;
+  is_paginated: boolean;
+  requires_completion: boolean;
+  number_of_attempts: number;
   created_at: string;
+  updated_at: string;
   questions: Question[];
+  processors?: QuestionnaireProcessorMapping[];
 }
 
 export interface QuestionnaireCreateData {
@@ -189,11 +202,10 @@ export interface Processor {
   description: string;
   prompt_template: string;
   post_processing_code?: string;
-  interpreter: 'python' | 'javascript' | 'none';
-  status: 'active' | 'inactive' | 'testing';
+  interpreter: string;
+  status: string;
   created_at: string;
   updated_at: string;
-  created_by_id: number;
   llm_model?: string;
   llm_temperature?: number;
   llm_max_tokens?: number;
@@ -220,4 +232,13 @@ export interface QuestionnaireProcessorMapping {
   processor_id: number;
   is_active: boolean;
   created_at: string;
+}
+
+export interface QuestionProcessorMapping {
+  id: number;
+  question_id: number;
+  processor_id: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 } 
