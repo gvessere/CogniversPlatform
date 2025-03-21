@@ -68,6 +68,7 @@ export interface Questionnaire {
   number_of_attempts: number;
   created_at: string;
   updated_at: string;
+  created_by_id: number;
   questions: Question[];
   processors?: QuestionnaireProcessorMapping[];
 }
@@ -204,6 +205,7 @@ export interface Processor {
   post_processing_code?: string;
   interpreter: string;
   status: string;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
   llm_model?: string;

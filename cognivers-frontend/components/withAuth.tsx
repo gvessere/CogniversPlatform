@@ -1,6 +1,7 @@
+import React from 'react';
 import { useRouter } from 'next/router';
 import { useEffect } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../context/AuthContext';
 import { CircularProgress, Box } from '@mui/material';
 
 // Higher-order component to protect routes that require authentication

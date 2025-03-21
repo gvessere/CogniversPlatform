@@ -840,7 +840,7 @@ export const deleteSession = async (id: number): Promise<void> => {
  * @param sessionId - The ID of the session
  * @returns An array of questionnaire objects
  */
-export async function getQuestionnaireInstances(sessionId: string): Promise<any> {
+export async function getQuestionnaireInstances(sessionId: number): Promise<any> {
   try {
     return await callFrontendApi(
       `/api/sessions/${sessionId}/questionnaires`, 
@@ -861,7 +861,7 @@ export async function getQuestionnaireInstances(sessionId: string): Promise<any>
  * @param data - The questionnaire data
  * @returns The created questionnaire object
  */
-export async function createQuestionnaireInstance(sessionId: string, data: any): Promise<any> {
+export async function createQuestionnaireInstance(sessionId: number, data: any): Promise<any> {
   try {
     return await callFrontendApi(
       `/api/sessions/${sessionId}/questionnaires`, 
@@ -882,7 +882,7 @@ export async function createQuestionnaireInstance(sessionId: string, data: any):
  * @param data - The updated questionnaire data
  * @returns The updated questionnaire object
  */
-export async function updateQuestionnaireInstance(questionnaireId: string, data: any): Promise<any> {
+export async function updateQuestionnaireInstance(questionnaireId: number, data: any): Promise<any> {
   try {
     return await callFrontendApi(
       `/api/sessions/questionnaires/${questionnaireId}`, 
@@ -902,7 +902,7 @@ export async function updateQuestionnaireInstance(questionnaireId: string, data:
  * @param questionnaireId - The ID of the questionnaire to delete
  * @returns Success status
  */
-export async function deleteQuestionnaireInstance(questionnaireId: string): Promise<any> {
+export async function deleteQuestionnaireInstance(questionnaireId: number): Promise<any> {
   try {
     return await callFrontendApi(
       `/api/sessions/questionnaires/${questionnaireId}`, 

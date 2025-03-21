@@ -11,12 +11,11 @@ WORKDIR /app
 COPY --from=builder /app/.next ./.next
 # Copy static assets
 COPY --from=builder /app/public ./public
-# Copy configuration and server files
+# Copy configuration files
 COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/next.config.ts ./
+COPY --from=builder /app/next.config.js ./
 COPY --from=builder /app/next-env.d.ts ./
 COPY --from=builder /app/tsconfig.json ./
-COPY --from=builder /app/server.ts ./
 # Install production dependencies
 RUN npm ci --omit=dev
 # Set environment and expose port

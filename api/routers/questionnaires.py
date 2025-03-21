@@ -14,6 +14,7 @@ from models.questionnaire import (
     QuestionType, QuestionnaireType, ClientSessionEnrollment, QuestionnaireInstance,
     Session
 )
+from models.processors import QuestionnaireProcessorMapping
 from models.user import User, UserRole
 from models.interaction import InteractionBatch
 from auth.dependencies import get_current_user
@@ -24,7 +25,8 @@ from schemas import (
     QuestionResponseCreate,
     QuestionnaireClientResponse,
     QuestionnaireAttemptResponse,
-    QuestionnaireAttemptsResponse
+    QuestionnaireAttemptsResponse,
+    QuestionnaireProcessorMappingResponse
 )
 
 # Helper function to convert type strings to QuestionnaireType enum
@@ -1209,4 +1211,35 @@ async def create_question_response(
             detail="Failed to generate question response ID"
         )
     
-    return schemas.IdResponse(id=new_question_response.id, message="Question response created successfully") 
+    return schemas.IdResponse(id=new_question_response.id, message="Question response created successfully")
+
+# Get processor mappings for a questionnaire
+@router.get("/{questionnaire_id}/processors", response_model=List[schemas.QuestionnaireProcessorMappingResponse])
+async def get_questionnaire_processors(
+    questionnaire_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Get all processor mappings for a specific questionnaire"""
+    # Get the questionnaire
+    result = await db.execute(
+        select(Questionnaire)
+        .where(Questionnaire.id == questionnaire_id)
+    )
+    questionnaire = result.scalar_one_or_none()
+    
+    if not questionnaire:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Questionnaire not found"
+        )
+    
+    # Get processor mappings
+    result = await db.execute(
+        select(QuestionnaireProcessorMapping)
+        .where(QuestionnaireProcessorMapping.questionnaire_id == questionnaire_id)
+        .options(joinedload(QuestionnaireProcessorMapping.processor))
+    )
+    mappings = result.unique().scalars().all()
+    
+    return mappings 

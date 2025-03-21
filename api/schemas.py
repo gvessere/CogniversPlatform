@@ -990,3 +990,21 @@ class ClientWithSessions(BaseModel):
     class Config:
         from_attributes = True
 
+class QuestionnaireProcessorMappingResponse(BaseResponseModel):
+    id: int
+    questionnaire_id: int
+    processor_id: int
+    is_active: bool
+    created_at: datetime
+
+    class Config(BaseResponseModel.Config):
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "questionnaire_id": 1,
+                "processor_id": 1,
+                "is_active": True,
+                "created_at": "2023-01-01T12:00:00"
+            }
+        }
+

@@ -89,9 +89,45 @@ export default function SessionDetail() {
         // Mock questionnaires data for now - in a real app, you would fetch this from the API
         // TODO: Replace with actual API call to get questionnaires
         setQuestionnaires([
-          { id: 1, title: 'Customer Satisfaction Survey', description: 'Feedback survey', created_by: 1, created_at: '2023-01-01', questions: [] },
-          { id: 2, title: 'Training Evaluation', description: 'Evaluate training effectiveness', created_by: 1, created_at: '2023-01-01', questions: [] },
-          { id: 3, title: 'Skills Assessment', description: 'Assess participant skills', created_by: 1, created_at: '2023-01-01', questions: [] }
+          { 
+            id: 1, 
+            title: 'Customer Satisfaction Survey', 
+            description: 'Feedback survey', 
+            type: 'survey',
+            is_paginated: false,
+            requires_completion: true,
+            number_of_attempts: 1,
+            created_by_id: 1, 
+            created_at: '2023-01-01',
+            updated_at: '2023-01-01',
+            questions: [] 
+          },
+          { 
+            id: 2, 
+            title: 'Training Evaluation', 
+            description: 'Evaluate training effectiveness', 
+            type: 'evaluation',
+            is_paginated: false,
+            requires_completion: true,
+            number_of_attempts: 1,
+            created_by_id: 1, 
+            created_at: '2023-01-01',
+            updated_at: '2023-01-01',
+            questions: [] 
+          },
+          { 
+            id: 3, 
+            title: 'Skills Assessment', 
+            description: 'Assess participant skills', 
+            type: 'assessment',
+            is_paginated: false,
+            requires_completion: true,
+            number_of_attempts: 1,
+            created_by_id: 1, 
+            created_at: '2023-01-01',
+            updated_at: '2023-01-01',
+            questions: [] 
+          }
         ]);
       } catch (error) {
         console.error('Error fetching session data:', error);

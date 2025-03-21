@@ -53,9 +53,10 @@ def process_questionnaire_response(self, response_id: int) -> Dict[str, Any]:
             result = await session.execute(
                 select(Question)
                 .join(Question.processors)
+                .join(Processor)
                 .where(
                     (Question.questionnaire_id == questionnaire_id) &
-                    (QuestionProcessorMapping.is_active == True)
+                    (Processor.is_active == True)
                 )
             )
             questions_with_processors = result.scalars().all()
@@ -214,6 +215,9 @@ def execute_processor(self, result_id: int) -> Dict[str, Any]:
                 # Format the prompt with the questions data using Jinja2
                 template = Template(processor.prompt_template)
                 prompt = template.render(**template_context)
+                
+                # Store the prompt
+                processing_result.prompt = prompt
                 
                 # TODO: Call the actual API with the prompt
                 # This is a placeholder for the actual API call

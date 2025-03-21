@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Box, 
   Typography, 
@@ -8,13 +8,14 @@ import {
   Snackbar
 } from '@mui/material';
 import { useRouter } from 'next/router';
-import { withNavigationLayout } from '../../../utils/layout';
-import { callFrontendApi } from '../../../lib/api';
-import ProcessorForm from '../../../components/ProcessorForm';
-import { Processor } from '../../../lib/types';
+import { withNavigationLayout } from '../../../../utils/layout';
+import { callFrontendApi } from '../../../../lib/api';
+import ProcessorForm from '../../../../components/ProcessorForm';
+import { Processor } from '../../../../lib/types';
 
-function CreateProcessor() {
+function EditProcessor() {
   const router = useRouter();
+  const { id } = router.query;
   const [formData, setFormData] = useState<Partial<Processor>>({
     name: '',
     description: '',
@@ -24,11 +25,31 @@ function CreateProcessor() {
     status: 'testing',
     is_active: true,
     llm_temperature: 0.7,
-    llm_max_tokens: 2000
+    llm_max_tokens: 2000,
+    llm_system_prompt: ''
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (id) {
+      fetchProcessor();
+    }
+  }, [id]);
+
+  const fetchProcessor = async () => {
+    try {
+      setLoading(true);
+      const data = await callFrontendApi<Processor>(`/api/processors/${id}`, 'GET');
+      setFormData(data);
+    } catch (err) {
+      console.error('Error fetching processor:', err);
+      setError('Failed to load processor');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,14 +58,14 @@ function CreateProcessor() {
     setSuccess(null);
 
     try {
-      await callFrontendApi('/api/processors', 'POST', formData);
-      setSuccess('Processor created successfully');
+      await callFrontendApi(`/api/processors/${id}`, 'PATCH', formData);
+      setSuccess('Processor updated successfully');
       setTimeout(() => {
         router.push('/admin/processors');
       }, 1500);
     } catch (err) {
-      console.error('Error creating processor:', err);
-      setError('Failed to create processor');
+      console.error('Error updating processor:', err);
+      setError('Failed to update processor');
     } finally {
       setLoading(false);
     }
@@ -53,7 +74,7 @@ function CreateProcessor() {
   return (
     <Box sx={{ my: 4 }}>
       <Typography variant="h4" component="h1" gutterBottom>
-        Create New Processor
+        Edit Processor
       </Typography>
 
       <Paper sx={{ p: 3, mt: 3 }}>
@@ -61,23 +82,24 @@ function CreateProcessor() {
           <ProcessorForm
             formData={formData}
             onChange={setFormData}
+            isEdit={true}
           />
 
           <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
-                <Button
-                  variant="contained"
-                  type="submit"
-                  disabled={loading}
-                >
-                  {loading ? 'Creating...' : 'Create Processor'}
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={() => router.push('/admin/processors')}
-                >
-                  Cancel
-                </Button>
-              </Box>
+            <Button
+              variant="contained"
+              type="submit"
+              disabled={loading}
+            >
+              {loading ? 'Updating...' : 'Update Processor'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => router.push('/admin/processors')}
+            >
+              Cancel
+            </Button>
+          </Box>
         </form>
       </Paper>
 
@@ -104,6 +126,6 @@ function CreateProcessor() {
 }
 
 // Apply navigation layout
-CreateProcessor.getLayout = withNavigationLayout;
+EditProcessor.getLayout = withNavigationLayout;
 
-export default CreateProcessor; 
+export default EditProcessor; 

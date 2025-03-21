@@ -46,6 +46,7 @@ class Processor(SQLModel, table=True):
     post_processing_code: Optional[str] = Field(sa_column=Column(Text), default=None)
     interpreter: InterpreterType = Field(sa_column=Column(SQLEnum(InterpreterType)), default=InterpreterType.NONE)
     status: ProcessorStatus = Field(sa_column=Column(SQLEnum(ProcessorStatus)), default=ProcessorStatus.TESTING)
+    is_active: bool = Field(default=True, description="Whether this processor is active and should process responses")
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     created_by_id: int = Field(foreign_key="user.id")
@@ -92,23 +93,22 @@ class QuestionProcessorMapping(SQLModel, table=True):
     processor: Processor = Relationship(back_populates="questions")
 
 class ProcessingResult(SQLModel, table=True):
-    """Results of processing on questionnaire responses"""
+    """Results of processing questionnaire responses"""
     __tablename__ = "processing_results"
     
     id: Optional[int] = Field(default=None, primary_key=True)
     questionnaire_response_id: int = Field(foreign_key="questionnaire_responses.id")
     processor_id: int = Field(foreign_key="processors.id")
-    processor_version: str = Field(nullable=False, max_length=100)
+    processor_version: str
+    prompt: str = Field(sa_column=Column(Text), description="The final prompt sent to the processor")
     raw_output: str = Field(sa_column=Column(Text))
-    processed_output: Optional[Dict] = Field(sa_column=Column(JSON), default=None)
-    status: str = Field(max_length=50, default="completed")  # completed, failed, processing
-    error_message: Optional[str] = Field(default=None)
+    processed_output: Optional[Dict[str, Any]] = Field(sa_column=Column(JSON), default=None)
+    status: str
+    error_message: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
-    
-    # New fields for batch processing
-    question_ids: List[int] = Field(sa_column=Column(JSON), default=[])  # List of question IDs processed in this batch
-    batch_index: Optional[int] = Field(default=None)  # Index of this result in the batch sequence
+    question_ids: List[int] = Field(sa_column=Column(JSON))
+    batch_index: Optional[int] = None
     
     # Relationships
     questionnaire_response: "QuestionnaireResponse" = Relationship(back_populates="processing_results")
