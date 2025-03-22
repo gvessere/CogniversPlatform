@@ -1,6 +1,6 @@
 # pyc files
 **/*.pyc
-
+**/__pycache__/
 
 # Age encryption keys
 .sops/keys.txt

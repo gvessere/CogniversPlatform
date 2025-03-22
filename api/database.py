@@ -26,8 +26,8 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     async with engine.begin() as conn:
         # Import all models here to ensure they're registered with SQLModel
-        from models.user import User
         from models.address import Address
+        from models.user import User
         from models.interaction import InteractionBatch
         from models.questionnaire import Questionnaire, Question, QuestionnaireResponse, QuestionResponse
         from models.processors import ProcessingResult, Annotation

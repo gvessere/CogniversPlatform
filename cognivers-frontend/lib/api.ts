@@ -1258,5 +1258,77 @@ export const getTaskDefinitions = async (questionnaireId: number): Promise<TaskD
   return getData(`/api/questionnaires/${questionnaireId}/task-definitions`);
 };
 
+export interface QuestionResponse {
+  id: number;
+  question_id: number;
+  questionnaire_response_id: number;
+  answer: string;
+  interaction_batch_id?: number;
+  started_at: string;
+  last_updated_at: string;
+  question_text: string;
+  question_type: string;
+  question_configuration: any;
+}
+
+export interface QuestionnaireResponseFilters {
+  session_id?: number;
+  start_date?: string;
+  end_date?: string;
+  user_name?: string;
+  user_email?: string;
+  questionnaire_id?: number;
+}
+
+export interface QuestionnaireResponse {
+  id: number;
+  questionnaire_id: number;
+  session_id: number;
+  user_id: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  user: User;
+  questionnaire: Questionnaire;
+  session: Session;
+  answers: QuestionResponse[];
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export const listQuestionnaireResponses = async (
+  page: number = 1,
+  limit: number = 10,
+  filters?: QuestionnaireResponseFilters
+): Promise<PaginatedResponse<QuestionnaireResponse>> => {
+  const params = new URLSearchParams({
+    page: page.toString(),
+    limit: limit.toString(),
+    ...(filters?.session_id && { session_id: filters.session_id.toString() }),
+    ...(filters?.start_date && { start_date: filters.start_date }),
+    ...(filters?.end_date && { end_date: filters.end_date }),
+    ...(filters?.user_name && { user_name: filters.user_name }),
+    ...(filters?.user_email && { user_email: filters.user_email }),
+    ...(filters?.questionnaire_id && { questionnaire_id: filters.questionnaire_id.toString() })
+  });
+
+  const response = await fetch(`${API_BASE_URL}/questionnaire-responses?${params.toString()}`, {
+    headers: {
+      'Authorization': `Bearer ${getToken()}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch questionnaire responses');
+  }
+
+  return response.json();
+};
+
 // No longer exporting any axios instances
 export default {}; 

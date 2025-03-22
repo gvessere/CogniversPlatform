@@ -10,8 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import AsyncSessionLocal
 from models.questionnaire import QuestionnaireResponse, QuestionResponse, Question
 from models.processors import Processor, ProcessingResult, InterpreterType
+from models.user import User
+from models.address import Address
 from datetime import datetime
 from jinja2 import Template
+from llm import generate_with_deepseek
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +55,7 @@ def process_questionnaire_response(self, response_id: int) -> Dict[str, Any]:
             # Get all questions with their assigned processors
             result = await session.execute(
                 select(Question)
-                .join(Question.processors)
+                .join(Question.processor_mappings)
                 .join(Processor)
                 .where(
                     (Question.questionnaire_id == questionnaire_id) &
@@ -76,10 +79,10 @@ def process_questionnaire_response(self, response_id: int) -> Dict[str, Any]:
             # Group questions by processor
             processor_questions = {}
             for question in questions_with_processors:
-                for processor in question.processors:
-                    if processor.id not in processor_questions:
-                        processor_questions[processor.id] = []
-                    processor_questions[processor.id].append(question)
+                for processor in question.processor_mappings:
+                    if processor.processor_id not in processor_questions:
+                        processor_questions[processor.processor_id] = []
+                    processor_questions[processor.processor_id].append(question)
             
             # Process each group of questions with their assigned processor
             for processor_id, questions in processor_questions.items():
@@ -125,7 +128,12 @@ def process_questionnaire_response(self, response_id: int) -> Dict[str, Any]:
     
     # Run the async function
     import asyncio
-    return asyncio.run(process())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(process())
+    finally:
+        loop.close()
 
 @celery_app.task(bind=True, track_started=True)
 def execute_processor(self, result_id: int) -> Dict[str, Any]:
@@ -219,18 +227,26 @@ def execute_processor(self, result_id: int) -> Dict[str, Any]:
                 # Store the prompt
                 processing_result.prompt = prompt
                 
-                # TODO: Call the actual API with the prompt
-                # This is a placeholder for the actual API call
-                output = f"Sample output for processor {processor.id} on questions {[q['id'] for q in questions_data]}"
+                # Call DeepSeek R1 with the processor's configuration
+                result = generate_with_deepseek(
+                    prompt=prompt,
+                    temperature=processor.llm_temperature or 0.7,
+                    max_tokens=processor.llm_max_tokens or 2000,
+                    stop_sequences=processor.llm_stop_sequences,
+                    system_prompt=processor.llm_system_prompt
+                )
+                
+                if result["error"]:
+                    raise Exception(f"DeepSeek R1 error: {result['error']}")
                 
                 # Store the raw output
-                processing_result.raw_output = output
+                processing_result.raw_output = result["output"]
                 
                 # Process the output if there's post-processing code
                 if processor.post_processing_code:
                     try:
                         # TODO: Implement post-processing logic
-                        processed_output = {"processed": output}
+                        processed_output = {"processed": result["output"]}
                         processing_result.processed_output = processed_output
                     except Exception as e:
                         logger.error(f"Error in post-processing: {str(e)}")
@@ -245,7 +261,7 @@ def execute_processor(self, result_id: int) -> Dict[str, Any]:
                 return {"message": "Processing completed successfully"}
                 
             except Exception as e:
-                logger.error(f"Error processing question: {str(e)}")
+                logger.error(f"Error processing response: {str(e)}")
                 processing_result.status = "failed"
                 processing_result.error_message = str(e)
                 await session.commit()
@@ -253,7 +269,12 @@ def execute_processor(self, result_id: int) -> Dict[str, Any]:
     
     # Run the async function
     import asyncio
-    return asyncio.run(process())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(process())
+    finally:
+        loop.close()
 
 def execute_post_processing(interpreter: InterpreterType, code: str, output: str, prompt_data: Dict) -> Dict[Any, Any]:
     """Execute post-processing code in the specified interpreter"""
@@ -335,7 +356,7 @@ def execute_post_processing(interpreter: InterpreterType, code: str, output: str
 @celery_app.task(bind=True, track_started=True)
 def requeue_processing(self, response_id: int, processor_id: Optional[int] = None) -> Dict[str, Any]:
     """Requeue a questionnaire response for processing"""
-    logger.info(f"Requeuing response {response_id} for processing")
+    logger.info(f"Requeuing response {response_id} for processing with processor {processor_id}")
     
     # Create async session
     async def process():
@@ -385,7 +406,12 @@ def requeue_processing(self, response_id: int, processor_id: Optional[int] = Non
     
     # Run the async function
     import asyncio
-    return asyncio.run(process())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(process())
+    finally:
+        loop.close()
 
 @shared_task
 def test_task(x: int) -> int:

@@ -1,15 +1,29 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, cast, Sequence, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, func, Column as SAColumn, distinct, text, or_, and_
+from sqlalchemy.sql import Select, expression, ClauseElement
+from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import FromClause, SelectBase
 from datetime import datetime
+from sqlalchemy.orm import joinedload
 
 from database import get_async_session
 from models.processors import (
-    Processor, QuestionnaireProcessorMapping, QuestionProcessorMapping,
-    ProcessingResult, ProcessorStatus, InterpreterType, TaskDefinition
+    Processor as ProcessorModel,
+    QuestionnaireProcessorMapping as QuestionnaireProcessorMappingModel,
+    QuestionProcessorMapping as QuestionProcessorMappingModel,
+    ProcessingResult as ProcessingResultModel,
+    ProcessorStatus, InterpreterType, TaskDefinition as TaskDefinitionModel
 )
-from models.questionnaire import Questionnaire, QuestionnaireResponse, Question
+from models.questionnaire import (
+    Questionnaire as QuestionnaireModel,
+    Question as QuestionModel,
+    QuestionnaireResponse as QuestionnaireResponseModel,
+    QuestionResponse as QuestionResponseModel,
+    QuestionType, QuestionnaireType, ClientSessionEnrollment, QuestionnaireInstance,
+    Session
+)
 from models.user import User, UserRole
 from auth.dependencies import get_current_user
 from tasks import process_questionnaire_response, requeue_processing
@@ -29,13 +43,14 @@ async def check_admin(current_user: User = Depends(get_current_user)):
 # Create new processor
 @router.post("", response_model=schemas.ProcessorResponse)
 async def create_processor(
-    processor_data: schemas.ProcessorCreate,
+    processor: schemas.ProcessorCreate,
     current_user: User = Depends(check_admin),
     db: AsyncSession = Depends(get_async_session)
 ):
+    """Create a new processor."""
     # Validate interpreter
     try:
-        interpreter = InterpreterType(processor_data.interpreter)
+        interpreter = InterpreterType(processor.interpreter)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -44,7 +59,7 @@ async def create_processor(
     
     # Validate status
     try:
-        processor_status = ProcessorStatus(processor_data.status)
+        processor_status = ProcessorStatus(processor.status)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -52,11 +67,11 @@ async def create_processor(
         )
     
     # Create new processor
-    new_processor = Processor(
-        name=processor_data.name,
-        description=processor_data.description,
-        prompt_template=processor_data.prompt_template,
-        post_processing_code=processor_data.post_processing_code,
+    new_processor = ProcessorModel(
+        name=processor.name,
+        description=processor.description,
+        prompt_template=processor.prompt_template,
+        post_processing_code=processor.post_processing_code,
         interpreter=interpreter,
         status=processor_status,
         created_by_id=current_user.id,
@@ -66,8 +81,8 @@ async def create_processor(
     
     db.add(new_processor)
     await db.commit()
+    await db.refresh(new_processor)
     
-    # Return the processor object directly
     return new_processor
 
 # Get all processors
@@ -76,7 +91,8 @@ async def get_processors(
     current_user: User = Depends(check_admin),
     db: AsyncSession = Depends(get_async_session)
 ):
-    result = await db.execute(select(Processor))
+    """Get all processors."""
+    result = await db.execute(select(ProcessorModel))
     processors = result.scalars().all()
     
     return processors
@@ -88,9 +104,10 @@ async def get_processor(
     current_user: User = Depends(check_admin),
     db: AsyncSession = Depends(get_async_session)
 ):
+    """Get a specific processor."""
     result = await db.execute(
-        select(Processor)
-        .where(Processor.id == processor_id)
+        select(ProcessorModel)
+        .where(ProcessorModel.id == processor_id)
     )
     processor = result.scalar_one_or_none()
     
@@ -103,29 +120,30 @@ async def get_processor(
     return processor
 
 # Update processor
-@router.patch("/{processor_id}", response_model=schemas.ProcessorResponse)
+@router.put("/{processor_id}", response_model=schemas.ProcessorResponse)
 async def update_processor(
     processor_id: int,
-    update_data: schemas.ProcessorUpdate,
+    processor: schemas.ProcessorUpdate,
     current_user: User = Depends(check_admin),
     db: AsyncSession = Depends(get_async_session)
 ):
+    """Update a processor."""
     result = await db.execute(
-        select(Processor)
-        .where(Processor.id == processor_id)
+        select(ProcessorModel)
+        .where(ProcessorModel.id == processor_id)
     )
-    processor = result.scalar_one_or_none()
+    existing_processor = result.scalar_one_or_none()
     
-    if not processor:
+    if not existing_processor:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Processor not found"
         )
     
     # Validate interpreter if provided
-    if update_data.interpreter:
+    if processor.interpreter:
         try:
-            update_data.interpreter = InterpreterType(update_data.interpreter)
+            processor.interpreter = InterpreterType(processor.interpreter)
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -133,9 +151,9 @@ async def update_processor(
             )
     
     # Validate status if provided
-    if update_data.status:
+    if processor.status:
         try:
-            update_data.status = ProcessorStatus(update_data.status)
+            processor.status = ProcessorStatus(processor.status)
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -143,15 +161,15 @@ async def update_processor(
             )
     
     # Update processor
-    update_dict = update_data.dict(exclude_unset=True)
-    for key, value in update_dict.items():
-        setattr(processor, key, value)
+    update_data = processor.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(existing_processor, key, value)
     
-    processor.updated_at = datetime.now()
+    existing_processor.updated_at = datetime.now()
     await db.commit()
+    await db.refresh(existing_processor)
     
-    # Return the processor object directly
-    return processor
+    return existing_processor
 
 # Delete processor
 @router.delete("/{processor_id}", response_model=schemas.MessageResponse)
@@ -160,9 +178,10 @@ async def delete_processor(
     current_user: User = Depends(check_admin),
     db: AsyncSession = Depends(get_async_session)
 ):
+    """Delete a processor."""
     result = await db.execute(
-        select(Processor)
-        .where(Processor.id == processor_id)
+        select(ProcessorModel)
+        .where(ProcessorModel.id == processor_id)
     )
     processor = result.scalar_one_or_none()
     
@@ -174,8 +193,8 @@ async def delete_processor(
     
     # Check if processor is used in any mappings
     result = await db.execute(
-        select(QuestionnaireProcessorMapping)
-        .where(QuestionnaireProcessorMapping.processor_id == processor_id)
+        select(QuestionnaireProcessorMappingModel)
+        .where(QuestionnaireProcessorMappingModel.processor_id == processor_id)
     )
     mappings = result.scalars().all()
     
@@ -192,17 +211,17 @@ async def delete_processor(
     return schemas.MessageResponse(message="Processor deleted successfully")
 
 # Assign processor to questions
-@router.post("/{processor_id}/assign", response_model=List[schemas.QuestionProcessorMappingResponse])
+@router.post("/{processor_id}/assign", response_model=schemas.TaskDefinitionResponse)
 async def assign_processor(
     processor_id: int,
-    mapping_data: schemas.QuestionProcessorMappingCreate,
+    mapping: schemas.QuestionProcessorMappingCreate,
     current_user: User = Depends(check_admin),
     db: AsyncSession = Depends(get_async_session)
 ):
     # Check if processor exists
     result = await db.execute(
-        select(Processor)
-        .where(Processor.id == processor_id)
+        select(ProcessorModel)
+        .where(ProcessorModel.id == processor_id)
     )
     processor = result.scalar_one_or_none()
     
@@ -214,8 +233,8 @@ async def assign_processor(
     
     # Check if questionnaire exists
     result = await db.execute(
-        select(Questionnaire)
-        .where(Questionnaire.id == mapping_data.questionnaire_id)
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == mapping.questionnaire_id)
     )
     questionnaire = result.scalar_one_or_none()
     
@@ -227,15 +246,15 @@ async def assign_processor(
     
     # Check if all questions exist and belong to the questionnaire
     result = await db.execute(
-        select(Question)
+        select(QuestionModel)
         .where(
-            (Question.id.in_(mapping_data.question_ids)) &
-            (Question.questionnaire_id == mapping_data.questionnaire_id)
+            (QuestionModel.id.in_(mapping.question_ids)) &
+            (QuestionModel.questionnaire_id == mapping.questionnaire_id)
         )
     )
     questions = result.scalars().all()
     
-    if len(questions) != len(mapping_data.question_ids):
+    if len(questions) != len(mapping.question_ids):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="One or more questions not found or do not belong to the questionnaire"
@@ -243,39 +262,39 @@ async def assign_processor(
     
     # Check for existing task definitions for this processor and questionnaire
     result = await db.execute(
-        select(TaskDefinition)
+        select(TaskDefinitionModel)
         .where(
-            (TaskDefinition.processor_id == processor_id) &
-            (TaskDefinition.questionnaire_id == mapping_data.questionnaire_id)
+            (TaskDefinitionModel.processor_id == processor_id) &
+            (TaskDefinitionModel.questionnaire_id == mapping.questionnaire_id)
         )
-        .order_by(TaskDefinition.created_at.desc())
+        .order_by(TaskDefinitionModel.created_at.desc())
     )
     existing_task_definitions = result.scalars().all()
     
     # Create a new task definition
-    task_definition = TaskDefinition(
+    task_definition = TaskDefinitionModel(
         processor_id=processor_id,
-        questionnaire_id=mapping_data.questionnaire_id,
-        is_active=mapping_data.is_active
+        questionnaire_id=mapping.questionnaire_id,
+        is_active=mapping.is_active
     )
     db.add(task_definition)
     await db.flush()  # Get the task_definition.id
     
     # Create new mappings
     new_mappings = []
-    for question_id in mapping_data.question_ids:
+    for question_id in mapping.question_ids:
         # Create new mapping
-        new_mapping = QuestionProcessorMapping(
+        new_mapping = QuestionProcessorMappingModel(
             processor_id=processor_id,
             question_id=question_id,
             task_definition_id=task_definition.id,
-            is_active=mapping_data.is_active
+            is_active=mapping.is_active
         )
         db.add(new_mapping)
         new_mappings.append(new_mapping)
     
     await db.commit()
-    return new_mappings
+    return task_definition
 
 # Remove processor from questions
 @router.delete("/{processor_id}/assign/{question_id}", response_model=schemas.MessageResponse)
@@ -287,10 +306,10 @@ async def remove_processor(
 ):
     # Check if mapping exists
     result = await db.execute(
-        select(QuestionProcessorMapping)
+        select(QuestionProcessorMappingModel)
         .where(
-            (QuestionProcessorMapping.processor_id == processor_id) &
-            (QuestionProcessorMapping.question_id == question_id)
+            (QuestionProcessorMappingModel.processor_id == processor_id) &
+            (QuestionProcessorMappingModel.question_id == question_id)
         )
     )
     mapping = result.scalar_one_or_none()
@@ -316,8 +335,8 @@ async def get_results_for_response(
 ):
     # Check if response exists
     result = await db.execute(
-        select(QuestionnaireResponse)
-        .where(QuestionnaireResponse.id == response_id)
+        select(QuestionnaireResponseModel)
+        .where(QuestionnaireResponseModel.id == response_id)
     )
     response = result.scalar_one_or_none()
     
@@ -329,8 +348,8 @@ async def get_results_for_response(
     
     # Get all results for this response
     result = await db.execute(
-        select(ProcessingResult)
-        .where(ProcessingResult.questionnaire_response_id == response_id)
+        select(ProcessingResultModel)
+        .where(ProcessingResultModel.questionnaire_response_id == response_id)
     )
     results = result.scalars().all()
     
@@ -344,8 +363,8 @@ async def get_result_detail(
     db: AsyncSession = Depends(get_async_session)
 ):
     result = await db.execute(
-        select(ProcessingResult)
-        .where(ProcessingResult.id == result_id)
+        select(ProcessingResultModel)
+        .where(ProcessingResultModel.id == result_id)
     )
     processing_result = result.scalar_one_or_none()
     
@@ -367,8 +386,8 @@ async def requeue_response(
 ):
     # Check if response exists
     result = await db.execute(
-        select(QuestionnaireResponse)
-        .where(QuestionnaireResponse.id == response_id)
+        select(QuestionnaireResponseModel)
+        .where(QuestionnaireResponseModel.id == response_id)
     )
     response = result.scalar_one_or_none()
     
@@ -381,4 +400,40 @@ async def requeue_response(
     # Requeue for processing
     requeue_processing.delay(response_id, requeue_data.processor_id)
     
-    return schemas.MessageResponse(message=f"Requeued response {response_id} for processing") 
+    return schemas.MessageResponse(message=f"Requeued response {response_id} for processing")
+
+# Queue processing for all responses of a questionnaire
+@router.post("/queue-responses", response_model=schemas.MessageResponse)
+async def queue_questionnaire_responses(
+    queue_data: schemas.QueueResponsesRequest,
+    current_user: User = Depends(check_admin),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Queue processing for all responses of a questionnaire."""
+    # Check if questionnaire exists
+    result = await db.execute(
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == queue_data.questionnaire_id)
+    )
+    questionnaire = result.scalar_one_or_none()
+    
+    if not questionnaire:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Questionnaire not found"
+        )
+    
+    # Get all responses for this questionnaire
+    result = await db.execute(
+        select(QuestionnaireResponseModel)
+        .where(QuestionnaireResponseModel.questionnaire_id == queue_data.questionnaire_id)
+    )
+    responses = result.scalars().all()
+    
+    # Queue processing for each response
+    for response in responses:
+        process_questionnaire_response.delay(response.id)
+    
+    return schemas.MessageResponse(
+        message=f"Queued processing for {len(responses)} responses"
+    ) 

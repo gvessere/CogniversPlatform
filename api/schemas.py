@@ -1,9 +1,10 @@
 from pydantic import BaseModel, SecretStr
-from typing import List, Dict, Optional, Any, Union
+from typing import List, Dict, Optional, Any, Union, TypeVar, Generic
 from datetime import datetime, date
 from enum import Enum
 from models.user import UserRole
 from models.questionnaire import QuestionType, QuestionnaireType
+from models.processors import ProcessorStatus, InterpreterType
 
 # Common configuration for all response models
 class BaseResponseModel(BaseModel):
@@ -11,6 +12,37 @@ class BaseResponseModel(BaseModel):
         from_attributes = True
         json_schema_extra: dict[str, dict] = {
             "example": {}  # Will be overridden by child classes
+        }
+
+# Generic type for paginated responses
+T = TypeVar('T')
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: List[T]
+    total: int
+    page: int
+    limit: int
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "items": [],
+                "total": 0,
+                "page": 1,
+                "limit": 10
+            }
+        }
+
+class CountResponse(BaseModel):
+    count: int
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "count": 42
+            }
         }
 
 # ==================== User Models ====================
@@ -645,31 +677,22 @@ class ProcessorBase(BaseModel):
     name: str
     description: str
     prompt_template: str
-    post_processing_code: Optional[str] = None
-    interpreter: str = "none"  # python, javascript, none
-    llm_model: Optional[str] = None
-    llm_temperature: Optional[float] = 0.7
-    llm_max_tokens: Optional[int] = 2000
-    llm_stop_sequences: Optional[List[str]] = None
-    llm_system_prompt: Optional[str] = None
+    post_processing_code: str
+    interpreter: InterpreterType
+    status: ProcessorStatus
 
 class ProcessorCreate(ProcessorBase):
-    status: str = "testing"  # active, inactive, testing
+    pass
 
     class Config:
         json_schema_extra = {
             "example": {
                 "name": "Sentiment Analysis",
-                "description": "Analyzes sentiment in questionnaire responses",
-                "prompt_template": "Analyze the sentiment in the following responses: {{questions}}",
-                "post_processing_code": "# Python code to process output\nimport json\ndata = json.loads(input())\nprint(json.dumps({'sentiment': 'positive'}))",
-                "interpreter": "python",
-                "status": "testing",
-                "llm_model": "gpt-4",
-                "llm_temperature": 0.7,
-                "llm_max_tokens": 2000,
-                "llm_stop_sequences": ["\n\n", "END"],
-                "llm_system_prompt": "You are a sentiment analysis expert. Analyze the following responses and provide a sentiment score."
+                "description": "Analyzes text sentiment",
+                "prompt_template": "Analyze the sentiment of: {text}",
+                "post_processing_code": "return {'sentiment': result}",
+                "interpreter": "PYTHON",
+                "status": "ACTIVE"
             }
         }
 
@@ -678,48 +701,36 @@ class ProcessorUpdate(BaseModel):
     description: Optional[str] = None
     prompt_template: Optional[str] = None
     post_processing_code: Optional[str] = None
-    interpreter: Optional[str] = None
-    status: Optional[str] = None
-    llm_model: Optional[str] = None
-    llm_temperature: Optional[float] = None
-    llm_max_tokens: Optional[int] = None
-    llm_stop_sequences: Optional[List[str]] = None
-    llm_system_prompt: Optional[str] = None
+    interpreter: Optional[InterpreterType] = None
+    status: Optional[ProcessorStatus] = None
 
     class Config:
         json_schema_extra = {
             "example": {
-                "status": "active",
-                "prompt_template": "Updated prompt template",
-                "llm_temperature": 0.5
+                "name": "Updated Name",
+                "status": "INACTIVE"
             }
         }
 
 class ProcessorResponse(ProcessorBase, BaseResponseModel):
     id: int
-    status: str
+    created_by_id: int
     created_at: datetime
     updated_at: datetime
-    created_by_id: int
 
     class Config(BaseResponseModel.Config):
         json_schema_extra = {
             "example": {
                 "id": 1,
                 "name": "Sentiment Analysis",
-                "description": "Analyzes sentiment in questionnaire responses",
-                "prompt_template": "Analyze the sentiment in the following responses: {{questions}}",
-                "post_processing_code": "# Python code to process output\nimport json\ndata = json.loads(input())\nprint(json.dumps({'sentiment': 'positive'}))",
-                "interpreter": "python",
-                "status": "active",
-                "created_at": "2023-01-01T12:00:00",
-                "updated_at": "2023-01-01T12:00:00",
+                "description": "Analyzes text sentiment",
+                "prompt_template": "Analyze the sentiment of: {text}",
+                "post_processing_code": "return {'sentiment': result}",
+                "interpreter": "PYTHON",
+                "status": "ACTIVE",
                 "created_by_id": 1,
-                "llm_model": "gpt-4",
-                "llm_temperature": 0.7,
-                "llm_max_tokens": 2000,
-                "llm_stop_sequences": ["\n\n", "END"],
-                "llm_system_prompt": "You are a sentiment analysis expert. Analyze the following responses and provide a sentiment score."
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00"
             }
         }
 
@@ -737,75 +748,136 @@ class QuestionProcessorMappingCreate(BaseModel):
             }
         }
 
-class QuestionProcessorMappingResponse(BaseResponseModel):
+class QuestionProcessorMappingResponse(BaseModel):
     id: int
-    question_id: int
     processor_id: int
+    question_id: int
+    task_definition_id: int
     is_active: bool
     created_at: datetime
     updated_at: datetime
 
-    class Config(BaseResponseModel.Config):
+    class Config:
+        from_attributes = True
         json_schema_extra = {
             "example": {
                 "id": 1,
-                "question_id": 1,
                 "processor_id": 1,
+                "question_id": 1,
+                "task_definition_id": 1,
                 "is_active": True,
-                "created_at": "2023-01-01T12:00:00",
-                "updated_at": "2023-01-01T12:00:00"
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00"
             }
         }
 
-class ProcessingResultResponse(BaseResponseModel):
+class QuestionnaireProcessorMappingResponse(BaseModel):
     id: int
-    questionnaire_response_id: int
     processor_id: int
-    processor_version: str
-    status: str
+    questionnaire_id: int
+    is_active: bool
     created_at: datetime
     updated_at: datetime
-    error_message: Optional[str] = None
-    
-    class Config(BaseResponseModel.Config):
+
+    class Config:
+        from_attributes = True
         json_schema_extra = {
             "example": {
                 "id": 1,
-                "questionnaire_response_id": 1,
                 "processor_id": 1,
-                "processor_version": "deepseek-r1@v0.1",
+                "questionnaire_id": 1,
+                "is_active": True,
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00"
+            }
+        }
+
+class ProcessingResultResponse(BaseModel):
+    id: int
+    processor_id: int
+    questionnaire_response_id: int
+    question_id: int
+    result: Dict[str, Any]
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "processor_id": 1,
+                "questionnaire_response_id": 1,
+                "question_id": 1,
+                "result": {"sentiment": "positive"},
                 "status": "completed",
-                "created_at": "2023-01-01T12:00:00",
-                "updated_at": "2023-01-01T12:00:00"
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00"
             }
         }
 
 class ProcessingResultDetailResponse(ProcessingResultResponse):
-    raw_output: str
-    processed_output: Optional[Dict] = None
-    
-    class Config(BaseResponseModel.Config):
+    error_message: Optional[str] = None
+    processing_time_ms: Optional[int] = None
+
+    class Config:
+        from_attributes = True
         json_schema_extra = {
             "example": {
                 "id": 1,
-                "questionnaire_response_id": 1,
                 "processor_id": 1,
-                "processor_version": "deepseek-r1@v0.1",
+                "questionnaire_response_id": 1,
+                "question_id": 1,
+                "result": {"sentiment": "positive"},
                 "status": "completed",
-                "created_at": "2023-01-01T12:00:00",
-                "updated_at": "2023-01-01T12:00:00",
-                "raw_output": "The sentiment analysis shows positive responses.",
-                "processed_output": {"sentiment": "positive"}
+                "error_message": None,
+                "processing_time_ms": 150,
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00"
             }
         }
 
 class RequeueRequest(BaseModel):
-    processor_id: Optional[int] = None
-    
+    processor_id: int
+
     class Config:
         json_schema_extra = {
             "example": {
                 "processor_id": 1
+            }
+        }
+
+class QueueResponsesRequest(BaseModel):
+    questionnaire_id: int
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "questionnaire_id": 1
+            }
+        }
+
+class TaskDefinitionResponse(BaseModel):
+    id: int
+    processor_id: int
+    questionnaire_id: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    question_ids: List[int]
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "processor_id": 1,
+                "questionnaire_id": 1,
+                "is_active": True,
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+                "question_ids": [1, 2, 3]
             }
         }
 
@@ -990,39 +1062,115 @@ class ClientWithSessions(BaseModel):
     class Config:
         from_attributes = True
 
-class QuestionnaireProcessorMappingResponse(BaseResponseModel):
+class QuestionnaireBasicInfo(BaseResponseModel):
     id: int
-    questionnaire_id: int
-    processor_id: int
-    is_active: bool
-    created_at: datetime
+    title: str
+    description: str
+    type: QuestionnaireType
+    is_paginated: bool
+    requires_completion: bool
+    number_of_attempts: int
 
     class Config(BaseResponseModel.Config):
         json_schema_extra = {
             "example": {
                 "id": 1,
-                "questionnaire_id": 1,
-                "processor_id": 1,
-                "is_active": True,
-                "created_at": "2023-01-01T12:00:00"
+                "title": "Sample Questionnaire",
+                "description": "A sample questionnaire",
+                "type": "signup",
+                "is_paginated": True,
+                "requires_completion": True,
+                "number_of_attempts": 1
             }
         }
 
-class TaskDefinitionResponse(BaseResponseModel):
+class QuestionResponseListItem(BaseResponseModel):
     id: int
-    processor_id: int
-    questionnaire_id: int
-    question_ids: List[int]
-    is_active: bool
+    question_id: int
+    questionnaire_response_id: int
+    question_text: str
+    question_type: QuestionType
+    question_configuration: Dict[str, Any]
+    answer: Dict[str, Any]
+    started_at: datetime
+    last_updated_at: datetime
+    completed_at: Optional[datetime] = None
 
     class Config(BaseResponseModel.Config):
         json_schema_extra = {
             "example": {
                 "id": 1,
-                "processor_id": 1,
+                "question_id": 1,
+                "questionnaire_response_id": 1,
+                "question_text": "Sample question",
+                "question_type": "text",
+                "question_configuration": {},
+                "answer": {"text": "Sample answer"},
+                "started_at": "2024-01-01T00:00:00",
+                "last_updated_at": "2024-01-01T00:00:00",
+                "completed_at": "2024-01-01T00:00:00"
+            }
+        }
+
+class QuestionnaireResponseListItem(BaseResponseModel):
+    id: int
+    questionnaire_id: int
+    session_id: Optional[int] = None
+    user_id: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    user: UserResponse
+    questionnaire: QuestionnaireBasicInfo
+    session: Optional[SessionBasicInfo] = None
+    answers: List[QuestionResponseListItem]
+
+    class Config(BaseResponseModel.Config):
+        json_schema_extra = {
+            "example": {
+                "id": 1,
                 "questionnaire_id": 1,
-                "question_ids": [1, 2, 3],
-                "is_active": True
+                "session_id": 1,
+                "user_id": 1,
+                "status": "completed",
+                "created_at": "2024-01-01T00:00:00",
+                "updated_at": "2024-01-01T00:00:00",
+                "user": {
+                    "id": 1,
+                    "email": "user@example.com",
+                    "first_name": "John",
+                    "last_name": "Doe",
+                    "role": "CLIENT"
+                },
+                "questionnaire": {
+                    "id": 1,
+                    "title": "Sample Questionnaire",
+                    "description": "A sample questionnaire",
+                    "type": "signup",
+                    "is_paginated": True,
+                    "requires_completion": True,
+                    "number_of_attempts": 1
+                },
+                "session": {
+                    "id": 1,
+                    "title": "Sample Session",
+                    "start_date": "2024-01-01",
+                    "end_date": "2024-12-31"
+                },
+                "answers": [
+                    {
+                        "id": 1,
+                        "question_id": 1,
+                        "questionnaire_response_id": 1,
+                        "question_text": "Sample question",
+                        "question_type": "text",
+                        "question_configuration": {},
+                        "answer": {"text": "Sample answer"},
+                        "started_at": "2024-01-01T00:00:00",
+                        "last_updated_at": "2024-01-01T00:00:00",
+                        "completed_at": "2024-01-01T00:00:00"
+                    }
+                ]
             }
         }
 

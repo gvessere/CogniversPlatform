@@ -46,8 +46,10 @@ interface TaskDefinition {
   id: number;
   processor_id: number;
   questionnaire_id: number;
-  question_ids: number[];
   is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  question_ids: number[];
 }
 
 export default function QuestionnaireManagement() {
@@ -62,6 +64,9 @@ export default function QuestionnaireManagement() {
   const [selectedQuestions, setSelectedQuestions] = useState<number[]>([]);
   const [taskDefinitions, setTaskDefinitions] = useState<Record<number, TaskDefinition[]>>({});
   const [expandedQuestionnaire, setExpandedQuestionnaire] = useState<number | null>(null);
+  const [openQueueDialog, setOpenQueueDialog] = useState(false);
+  const [queueCount, setQueueCount] = useState(0);
+  const [queueing, setQueueing] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -129,17 +134,43 @@ export default function QuestionnaireManagement() {
     if (!selectedQuestionnaire || !selectedProcessor) return;
 
     try {
-      await callFrontendApi(`/api/processors/${selectedProcessor}/assign`, 'POST', {
+      // First create the task definition
+      const response = await callFrontendApi(`/api/processors/${selectedProcessor}/assign`, 'POST', {
         questionnaire_id: selectedQuestionnaire.id,
         question_ids: selectedQuestions
       });
+
+      // Get the count of existing responses
+      const countResponse = await callFrontendApi(`/api/questionnaire-responses/count?questionnaire_id=${selectedQuestionnaire.id}`, 'GET');
+      setQueueCount(countResponse.count);
+
+      // Show the queue dialog
+      setOpenQueueDialog(true);
       setOpenProcessorDialog(false);
       setSelectedProcessor(null);
       setSelectedQuestions([]);
-      fetchData(); // Refresh to get updated task definitions
     } catch (err) {
       console.error('Error assigning processor:', err);
       setError('Failed to assign processor. Please try again later.');
+    }
+  };
+
+  const handleQueueTasks = async () => {
+    if (!selectedQuestionnaire) return;
+
+    try {
+      setQueueing(true);
+      // Queue processing for all responses
+      await callFrontendApi(`/api/processors/queue-responses`, 'POST', {
+        questionnaire_id: selectedQuestionnaire.id
+      });
+      setOpenQueueDialog(false);
+      fetchData(); // Refresh to get updated task definitions
+    } catch (err) {
+      console.error('Error queueing tasks:', err);
+      setError('Failed to queue tasks. Please try again later.');
+    } finally {
+      setQueueing(false);
     }
   };
 
@@ -227,7 +258,7 @@ export default function QuestionnaireManagement() {
             <List>
               {taskDefinitions[questionnaire.id]?.map((taskDefinition) => {
                 const processor = processors.find(p => p.id === taskDefinition.processor_id);
-                const questions = questionnaire.questions.filter(q => taskDefinition.question_ids.includes(q.id));
+                const questions = questionnaire.questions.filter(q => taskDefinition.question_ids?.includes(q.id) ?? false);
                 return (
                   <React.Fragment key={taskDefinition.id}>
                     <ListItem>
@@ -314,6 +345,29 @@ export default function QuestionnaireManagement() {
             disabled={!selectedProcessor || selectedQuestions.length === 0}
           >
             Create Task Definition
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Queue Tasks Dialog */}
+      <Dialog
+        open={openQueueDialog}
+        onClose={() => setOpenQueueDialog(false)}
+      >
+        <DialogTitle>Queue Processing Tasks</DialogTitle>
+        <DialogContent>
+          <Typography>
+            There are {queueCount} existing responses for this questionnaire. Would you like to queue processing tasks for all of them?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenQueueDialog(false)}>No, Skip</Button>
+          <Button
+            onClick={handleQueueTasks}
+            variant="contained"
+            disabled={queueing}
+          >
+            {queueing ? 'Queueing...' : 'Yes, Queue Tasks'}
           </Button>
         </DialogActions>
       </Dialog>

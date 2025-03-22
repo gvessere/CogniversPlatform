@@ -106,6 +106,12 @@ const adminItems: NavigationItem[] = [
     roles: [UserRole.ADMINISTRATOR]
   },
   {
+    text: 'Questionnaire Responses',
+    icon: <AssignmentIcon color="primary" />,
+    path: '/admin/questionnaire-responses',
+    roles: [UserRole.ADMINISTRATOR]
+  },
+  {
     text: 'LLM Processors',
     icon: <AutoGraphIcon color="primary" />,
     path: '/admin/processors',

@@ -117,6 +117,7 @@ class QuestionnaireResponse(SQLModel, table=True):
     questionnaire_instance: Optional[QuestionnaireInstance] = Relationship(back_populates="responses")
     question_responses: List["QuestionResponse"] = Relationship(back_populates="questionnaire_response")
     processing_results: List["ProcessingResult"] = Relationship(back_populates="questionnaire_response")
+    user: "User" = Relationship()
 
 class QuestionResponse(SQLModel, table=True):
     __tablename__ = "question_responses"

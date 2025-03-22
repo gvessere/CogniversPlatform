@@ -1,8 +1,8 @@
 from typing import List, Optional, Dict, Any, cast, Sequence, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, Column as SAColumn, distinct, text
-from sqlalchemy.sql import Select, expression
+from sqlalchemy import select, func, Column as SAColumn, distinct, text, or_, and_
+from sqlalchemy.sql import Select, expression, ClauseElement
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import FromClause, SelectBase
 from datetime import datetime
@@ -10,7 +10,10 @@ from sqlalchemy.orm import joinedload
 
 from database import get_async_session
 from models.questionnaire import (
-    Questionnaire, Question, QuestionnaireResponse, QuestionResponse,
+    Questionnaire as QuestionnaireModel,
+    Question as QuestionModel,
+    QuestionnaireResponse as QuestionnaireResponseModel,
+    QuestionResponse as QuestionResponseModel,
     QuestionType, QuestionnaireType, ClientSessionEnrollment, QuestionnaireInstance,
     Session
 )
@@ -22,16 +25,165 @@ from models.interaction import InteractionBatch
 from auth.dependencies import get_current_user
 from tasks import process_questionnaire_response
 import schemas
-from schemas import (
-    QuestionnaireResponse as QuestionnaireResponseSchema,
-    QuestionResponseCreate,
-    QuestionnaireClientResponse,
-    QuestionnaireAttemptResponse,
-    QuestionnaireAttemptsResponse,
-    QuestionnaireProcessorMappingResponse,
-    QuestionProcessorMappingResponse,
-    TaskDefinitionResponse
-)
+
+# Import response schemas
+from schemas import QuestionnaireResponse, PaginatedResponse
+
+# Create a router for questionnaire responses
+responses_router = APIRouter(prefix="/responses", tags=["questionnaire-responses"])
+
+# Count questionnaire responses
+@responses_router.get("/count", response_model=schemas.CountResponse)
+async def count_questionnaire_responses(
+    questionnaire_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Count questionnaire responses with optional filtering."""
+    # Build base query
+    base_query = select(func.count()).select_from(QuestionnaireResponseModel)
+
+    # Apply filters
+    if questionnaire_id:
+        base_query = base_query.where(QuestionnaireResponseModel.questionnaire_id == questionnaire_id)
+
+    # Execute query
+    count = await db.scalar(base_query) or 0  # Default to 0 if count is None
+
+    return schemas.CountResponse(count=count)
+
+# List all questionnaire responses
+@responses_router.get("", response_model=schemas.PaginatedResponse[schemas.QuestionnaireResponseListItem])
+async def list_questionnaire_responses(
+    page: int = 1,
+    limit: int = 10,
+    session_id: Optional[int] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    user_name: Optional[str] = None,
+    user_email: Optional[str] = None,
+    questionnaire_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """List questionnaire responses with filtering options."""
+    # Build base query
+    base_query = (
+        select(QuestionnaireResponseModel)
+        .join(User)
+        .join(QuestionnaireModel, isouter=False)  # Ensure inner join for questionnaire
+        .outerjoin(QuestionnaireInstance)
+        .outerjoin(Session)
+        .options(
+            joinedload(QuestionnaireResponseModel.user),
+            joinedload(QuestionnaireResponseModel.questionnaire),
+            joinedload(QuestionnaireResponseModel.questionnaire_instance).joinedload(QuestionnaireInstance.session),
+            joinedload(QuestionnaireResponseModel.question_responses).joinedload(QuestionResponseModel.question)
+        )
+    )
+
+    # Apply filters
+    if session_id:
+        base_query = base_query.where(Session.id == session_id)
+    
+    if start_date:
+        base_query = base_query.where(QuestionnaireResponseModel.started_at >= start_date)
+    
+    if end_date:
+        base_query = base_query.where(QuestionnaireResponseModel.started_at <= end_date)
+    
+    if user_name:
+        base_query = base_query.where(
+            or_(
+                User.first_name.ilike(f"%{user_name}%"),
+                User.last_name.ilike(f"%{user_name}%")
+            )
+        )
+    
+    if user_email:
+        base_query = base_query.where(User.email.ilike(f"%{user_email}%"))
+    
+    if questionnaire_id:
+        base_query = base_query.where(QuestionnaireResponseModel.questionnaire_id == questionnaire_id)
+
+    # Count total responses
+    count_query = select(func.count()).select_from(base_query.subquery())
+    total = await db.scalar(count_query) or 0  # Default to 0 if count is None
+
+    # Apply pagination
+    base_query = base_query.offset((page - 1) * limit).limit(limit)
+
+    # Execute query
+    result = await db.execute(base_query)
+    responses = result.unique().scalars().all()
+
+    # Convert to response format with error handling
+    items = []
+    for response in responses:
+        try:
+            # Validate questionnaire data
+            if not response.questionnaire:
+                print(f"Warning: Response {response.id} has no associated questionnaire")
+                continue
+
+            # Validate required questionnaire fields
+            required_fields = ['id', 'title', 'description', 'type', 'is_paginated', 'requires_completion', 'number_of_attempts']
+            missing_fields = [field for field in required_fields if not hasattr(response.questionnaire, field)]
+            if missing_fields:
+                print(f"Warning: Response {response.id} questionnaire is missing required fields: {missing_fields}")
+                continue
+
+            items.append(schemas.QuestionnaireResponseListItem(
+                id=response.id,
+                questionnaire_id=response.questionnaire_id,
+                session_id=response.questionnaire_instance.session_id if response.questionnaire_instance else None,
+                user_id=response.user_id,
+                status="completed" if response.completed_at else "in_progress",
+                created_at=response.started_at,
+                updated_at=response.completed_at or response.started_at,
+                user=response.user,
+                questionnaire=schemas.QuestionnaireBasicInfo(
+                    id=response.questionnaire.id,
+                    title=response.questionnaire.title,
+                    description=response.questionnaire.description,
+                    type=response.questionnaire.type,
+                    is_paginated=response.questionnaire.is_paginated,
+                    requires_completion=response.questionnaire.requires_completion,
+                    number_of_attempts=response.questionnaire.number_of_attempts
+                ),
+                session=response.questionnaire_instance.session if response.questionnaire_instance else None,
+                answers=[
+                    schemas.QuestionResponseListItem(
+                        id=answer.id,
+                        question_id=answer.question_id,
+                        questionnaire_response_id=answer.questionnaire_response_id,
+                        question_text=answer.question.text,
+                        question_type=answer.question.type,
+                        question_configuration=answer.question.configuration,
+                        answer=answer.answer,
+                        started_at=answer.started_at,
+                        last_updated_at=answer.last_updated_at,
+                        completed_at=answer.completed_at
+                    )
+                    for answer in response.question_responses
+                ]
+            ))
+        except Exception as e:
+            print(f"Error processing response {response.id}: {str(e)}")
+            continue
+
+    return schemas.PaginatedResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit
+    )
+
+# Create the main router
+router = APIRouter(prefix="/questionnaires", tags=["questionnaires"])
+
+# Include the responses router
+router.include_router(responses_router)
 
 # Helper function to convert type strings to QuestionnaireType enum
 def try_convert_to_questionnaire_type(type_str: str) -> QuestionnaireType:
@@ -44,8 +196,6 @@ def try_convert_to_questionnaire_type(type_str: str) -> QuestionnaireType:
     except (ValueError, TypeError):
         # If conversion fails, use a default
         return QuestionnaireType.SIGNUP
-
-router = APIRouter(prefix="/questionnaires", tags=["questionnaires"])
 
 # Helper function to check user permissions
 async def check_admin_or_trainer(current_user: User = Depends(get_current_user)):
@@ -63,7 +213,7 @@ async def create_questionnaire(
     current_user: User = Depends(check_admin_or_trainer),
     db: AsyncSession = Depends(get_async_session)
 ):
-    new_questionnaire = Questionnaire(
+    new_questionnaire = QuestionnaireModel(
         title=questionnaire_data.title,
         description=questionnaire_data.description,
         type=questionnaire_data.type,
@@ -78,7 +228,7 @@ async def create_questionnaire(
     
     # Create questions
     questions = [
-        Question(
+        QuestionModel(
             questionnaire_id=new_questionnaire.id,
             **question.dict()
         )
@@ -146,13 +296,13 @@ async def get_client_questionnaires(
         
         # Get all responses for the current user
         result = await db.execute(
-            select(QuestionnaireResponse)
-            .where(QuestionnaireResponse.user_id == current_user.id)
+            select(QuestionnaireResponseModel)
+            .where(QuestionnaireResponseModel.user_id == current_user.id)
         )
         user_responses = result.scalars().all()
         
         # Group responses by questionnaire
-        responses_by_questionnaire: dict[int, list[QuestionnaireResponse]] = {}
+        responses_by_questionnaire: dict[int, list[QuestionnaireResponseModel]] = {}
         for response in user_responses:
             if response.questionnaire_id not in responses_by_questionnaire:
                 responses_by_questionnaire[response.questionnaire_id] = []
@@ -194,7 +344,7 @@ async def get_client_questionnaires(
         )
 
 # Get all questionnaires
-@router.get("", response_model=List[QuestionnaireResponseSchema])
+@router.get("", response_model=List[schemas.QuestionnaireResponse])
 async def get_questionnaires(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
@@ -280,7 +430,7 @@ async def get_questionnaires(
                 type_value = QuestionnaireType.SIGNUP
             
             response_data.append(
-                QuestionnaireResponseSchema(
+                schemas.QuestionnaireResponse(
                     id=row.id,
                     title=row.title,
                     description=row.description,
@@ -303,16 +453,16 @@ async def get_questionnaires(
     return response_data
 
 # Get single questionnaire with questions
-@router.get("/{questionnaire_id}", response_model=QuestionnaireResponseSchema)
+@router.get("/{questionnaire_id}", response_model=schemas.QuestionnaireResponse)
 async def get_questionnaire(
     questionnaire_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
     result = await db.execute(
-        select(Questionnaire)
-        .where(Questionnaire.id == questionnaire_id)
-        .options(joinedload(Questionnaire.questions))
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == questionnaire_id)
+        .options(joinedload(QuestionnaireModel.questions))
     )
     questionnaire = result.unique().scalar_one_or_none()
     
@@ -360,7 +510,7 @@ async def get_questionnaire(
         type_value = QuestionnaireType.SIGNUP  # Default value
     
     # Create the response with session information
-    response = QuestionnaireResponseSchema(
+    response = schemas.QuestionnaireResponse(
         id=questionnaire.id,
         title=questionnaire.title,
         description=questionnaire.description,
@@ -387,9 +537,9 @@ async def update_questionnaire(
     db: AsyncSession = Depends(get_async_session)
 ):
     result = await db.execute(
-        select(Questionnaire)
-        .where(Questionnaire.id == questionnaire_id)
-        .options(joinedload(Questionnaire.questions))
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == questionnaire_id)
+        .options(joinedload(QuestionnaireModel.questions))
     )
     questionnaire = result.unique().scalar_one_or_none()
     
@@ -474,7 +624,7 @@ async def update_questionnaire(
                 processed_question_ids.add(existing_question.id)
             else:
                 # Create new question
-                new_question = Question(
+                new_question = QuestionModel(
                     questionnaire_id=questionnaire_id,
                     order=i + 1
                 )
@@ -490,8 +640,8 @@ async def update_questionnaire(
             if question_id not in processed_question_ids:
                 # Check if this question has any responses before deleting
                 result = await db.execute(
-                    select(func.count(QuestionResponse.id))
-                    .where(QuestionResponse.question_id == question_id)
+                    select(func.count(QuestionResponseModel.id))
+                    .where(QuestionResponseModel.question_id == question_id)
                 )
                 response_count = result.scalar_one()
                 
@@ -512,8 +662,8 @@ async def add_question(
     db: AsyncSession = Depends(get_async_session)
 ):
     result = await db.execute(
-        select(Questionnaire)
-        .where(Questionnaire.id == questionnaire_id)
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == questionnaire_id)
     )
     questionnaire = result.scalar_one_or_none()
     
@@ -523,7 +673,7 @@ async def add_question(
             detail="Questionnaire not found"
         )
     
-    new_question = Question(
+    new_question = QuestionModel(
         questionnaire_id=questionnaire_id,
         **question_data.dict()
     )
@@ -550,10 +700,10 @@ async def update_question(
     db: AsyncSession = Depends(get_async_session)
 ):
     result = await db.execute(
-        select(Question)
+        select(QuestionModel)
         .where(
-            (Question.id == question_id) & 
-            (Question.questionnaire_id == questionnaire_id)
+            (QuestionModel.id == question_id) & 
+            (QuestionModel.questionnaire_id == questionnaire_id)
         )
     )
     question = result.scalar_one_or_none()
@@ -581,10 +731,10 @@ async def delete_question(
     db: AsyncSession = Depends(get_async_session)
 ):
     result = await db.execute(
-        select(Question)
+        select(QuestionModel)
         .where(
-            (Question.id == question_id) & 
-            (Question.questionnaire_id == questionnaire_id)
+            (QuestionModel.id == question_id) & 
+            (QuestionModel.questionnaire_id == questionnaire_id)
         )
     )
     question = result.scalar_one_or_none()
@@ -609,8 +759,8 @@ async def start_questionnaire(
 ):
     # Check if questionnaire exists
     result = await db.execute(
-        select(Questionnaire)
-        .where(Questionnaire.id == questionnaire_id)
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == questionnaire_id)
     )
     questionnaire = result.scalar_one_or_none()
     
@@ -622,11 +772,11 @@ async def start_questionnaire(
     
     # Check if user has an incomplete response
     result = await db.execute(
-        select(QuestionnaireResponse)
+        select(QuestionnaireResponseModel)
         .where(
-            (QuestionnaireResponse.questionnaire_id == questionnaire_id) &
-            (QuestionnaireResponse.user_id == current_user.id) &
-            (QuestionnaireResponse.completed_at == None)
+            (QuestionnaireResponseModel.questionnaire_id == questionnaire_id) &
+            (QuestionnaireResponseModel.user_id == current_user.id) &
+            (QuestionnaireResponseModel.completed_at == None)
         )
     )
     existing_response = result.scalar_one_or_none()
@@ -647,10 +797,10 @@ async def start_questionnaire(
     
     # Get the next attempt number for this questionnaire and user
     result = await db.execute(
-        select(func.coalesce(func.max(QuestionnaireResponse.attempt_number), 0) + 1)
+        select(func.coalesce(func.max(QuestionnaireResponseModel.attempt_number), 0) + 1)
         .where(
-            (QuestionnaireResponse.questionnaire_id == questionnaire_id) &
-            (QuestionnaireResponse.user_id == current_user.id)
+            (QuestionnaireResponseModel.questionnaire_id == questionnaire_id) &
+            (QuestionnaireResponseModel.user_id == current_user.id)
         )
     )
     next_attempt_number = result.scalar_one()
@@ -665,7 +815,7 @@ async def start_questionnaire(
         )
     
     # Create new response
-    new_response = QuestionnaireResponse(
+    new_response = QuestionnaireResponseModel(
         questionnaire_id=questionnaire_id,
         user_id=current_user.id,
         attempt_number=next_attempt_number
@@ -700,19 +850,19 @@ async def submit_question_response(
     questionnaire_id: int,
     response_id: int,
     question_id: int,
-    response_data: QuestionResponseCreate,
+    response_data: schemas.QuestionResponseCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
     # Verify questionnaire response belongs to user
     result = await db.execute(
-        select(QuestionnaireResponse)
+        select(QuestionnaireResponseModel)
         .where(
-            (QuestionnaireResponse.id == response_id) & 
-            (QuestionnaireResponse.questionnaire_id == questionnaire_id) &
-            (QuestionnaireResponse.user_id == current_user.id)
+            (QuestionnaireResponseModel.id == response_id) & 
+            (QuestionnaireResponseModel.questionnaire_id == questionnaire_id) &
+            (QuestionnaireResponseModel.user_id == current_user.id)
         )
-        .join(Questionnaire)
+        .join(QuestionnaireModel)
     )
     questionnaire_response = result.scalar_one_or_none()
     
@@ -730,10 +880,10 @@ async def submit_question_response(
     
     # Check if question exists and belongs to questionnaire
     result = await db.execute(
-        select(Question)
+        select(QuestionModel)
         .where(
-            (Question.id == question_id) & 
-            (Question.questionnaire_id == questionnaire_id)
+            (QuestionModel.id == question_id) & 
+            (QuestionModel.questionnaire_id == questionnaire_id)
         )
     )
     question = result.scalar_one_or_none()
@@ -746,10 +896,10 @@ async def submit_question_response(
     
     # Get or create question response
     result = await db.execute(
-        select(QuestionResponse)
+        select(QuestionResponseModel)
         .where(
-            (QuestionResponse.question_id == question_id) &
-            (QuestionResponse.questionnaire_response_id == response_id)
+            (QuestionResponseModel.question_id == question_id) &
+            (QuestionResponseModel.questionnaire_response_id == response_id)
         )
     )
     question_response = result.scalar_one_or_none()
@@ -762,7 +912,7 @@ async def submit_question_response(
             question_response.interaction_batch_id = response_data.interaction_batch_id
     else:
         # Create new response with question details
-        question_response = QuestionResponse(
+        question_response = QuestionResponseModel(
             question_id=question_id,
             questionnaire_response_id=response_id,
             question_text=question.text,
@@ -798,14 +948,14 @@ async def complete_questionnaire_response(
 ):
     # Verify questionnaire response belongs to user
     result = await db.execute(
-        select(QuestionnaireResponse)
+        select(QuestionnaireResponseModel)
         .where(
-            (QuestionnaireResponse.id == response_id) & 
-            (QuestionnaireResponse.questionnaire_id == questionnaire_id) &
-            (QuestionnaireResponse.user_id == current_user.id)
+            (QuestionnaireResponseModel.id == response_id) & 
+            (QuestionnaireResponseModel.questionnaire_id == questionnaire_id) &
+            (QuestionnaireResponseModel.user_id == current_user.id)
         )
-        .join(Questionnaire)
-        .options(joinedload(QuestionnaireResponse.questionnaire))
+        .join(QuestionnaireModel)
+        .options(joinedload(QuestionnaireResponseModel.questionnaire))
     )
     questionnaire_response = result.unique().scalar_one_or_none()
     
@@ -825,18 +975,18 @@ async def complete_questionnaire_response(
     if questionnaire_response.questionnaire.requires_completion:
         # Get all required questions
         result = await db.execute(
-            select(Question)
+            select(QuestionModel)
             .where(
-                (Question.questionnaire_id == questionnaire_id) &
-                (Question.is_required == True)
+                (QuestionModel.questionnaire_id == questionnaire_id) &
+                (QuestionModel.is_required == True)
             )
         )
         required_questions = result.scalars().all()
         
         # Get answered questions
         result = await db.execute(
-            select(QuestionResponse)
-            .where(QuestionResponse.questionnaire_response_id == response_id)
+            select(QuestionResponseModel)
+            .where(QuestionResponseModel.questionnaire_response_id == response_id)
         )
         answered_questions = result.scalars().all()
         answered_question_ids = {r.question_id for r in answered_questions}
@@ -871,8 +1021,8 @@ async def delete_questionnaire(
 ):
     # Get the questionnaire
     result = await db.execute(
-        select(Questionnaire)
-        .where(Questionnaire.id == questionnaire_id)
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == questionnaire_id)
     )
     questionnaire = result.scalar_one_or_none()
     
@@ -911,8 +1061,8 @@ async def get_questionnaire_sessions(
 ):
     # Get the questionnaire
     result = await db.execute(
-        select(Questionnaire)
-        .where(Questionnaire.id == questionnaire_id)
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == questionnaire_id)
     )
     questionnaire = result.scalar_one_or_none()
     
@@ -962,9 +1112,9 @@ async def clone_questionnaire(
 ):
     # Get the questionnaire to clone
     result = await db.execute(
-        select(Questionnaire)
-        .options(joinedload(Questionnaire.questions))
-        .where(Questionnaire.id == questionnaire_id)
+        select(QuestionnaireModel)
+        .options(joinedload(QuestionnaireModel.questions))
+        .where(QuestionnaireModel.id == questionnaire_id)
     )
     questionnaire = result.scalar_one_or_none()
     
@@ -975,7 +1125,7 @@ async def clone_questionnaire(
         )
     
     # Create a new questionnaire with the same data
-    new_questionnaire = Questionnaire(
+    new_questionnaire = QuestionnaireModel(
         title=f"{questionnaire.title} (Clone)",
         description=questionnaire.description,
         type=questionnaire.type,
@@ -990,7 +1140,7 @@ async def clone_questionnaire(
     
     # Clone the questions
     for question in questionnaire.questions:
-        new_question = Question(
+        new_question = QuestionModel(
             questionnaire_id=new_questionnaire.id,
             text=question.text,
             type=question.type,
@@ -1025,8 +1175,8 @@ async def get_questionnaire_attempts(
     try:
         # Check if questionnaire exists
         result = await db.execute(
-            select(Questionnaire)
-            .where(Questionnaire.id == questionnaire_id)
+            select(QuestionnaireModel)
+            .where(QuestionnaireModel.id == questionnaire_id)
         )
         questionnaire = result.scalar_one_or_none()
         
@@ -1038,12 +1188,12 @@ async def get_questionnaire_attempts(
         
         # Get all attempts for this user and questionnaire
         result = await db.execute(
-            select(QuestionnaireResponse)
+            select(QuestionnaireResponseModel)
             .where(
-                (QuestionnaireResponse.questionnaire_id == questionnaire_id) &
-                (QuestionnaireResponse.user_id == current_user.id)
+                (QuestionnaireResponseModel.questionnaire_id == questionnaire_id) &
+                (QuestionnaireResponseModel.user_id == current_user.id)
             )
-            .order_by(QuestionnaireResponse.started_at.desc())
+            .order_by(QuestionnaireResponseModel.started_at.desc())
         )
         attempts = result.scalars().all()
         
@@ -1093,13 +1243,13 @@ async def get_questionnaire_response(
     
     # Verify questionnaire response belongs to user
     result = await db.execute(
-        select(QuestionnaireResponse)
+        select(QuestionnaireResponseModel)
         .where(
-            (QuestionnaireResponse.id == response_id) & 
-            (QuestionnaireResponse.questionnaire_id == questionnaire_id) &
-            (QuestionnaireResponse.user_id == current_user.id)
+            (QuestionnaireResponseModel.id == response_id) & 
+            (QuestionnaireResponseModel.questionnaire_id == questionnaire_id) &
+            (QuestionnaireResponseModel.user_id == current_user.id)
         )
-        .options(joinedload(QuestionnaireResponse.question_responses))
+        .options(joinedload(QuestionnaireResponseModel.question_responses))
     )
     questionnaire_response = result.unique().scalar_one_or_none()
     
@@ -1128,94 +1278,35 @@ async def get_questionnaire_response(
         "responses": responses
     }
 
-# Create question response
-@router.post("/{questionnaire_id}/responses/{response_id}/questions", response_model=schemas.IdResponse)
-async def create_question_response(
+# Get responses count for a specific questionnaire
+@router.get("/{questionnaire_id}/responses/count", response_model=schemas.CountResponse)
+async def get_questionnaire_responses_count(
     questionnaire_id: int,
-    response_id: int,
-    question_response: QuestionResponseCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
-    # Verify questionnaire response belongs to user
+    """Get the count of responses for a questionnaire."""
+    # Check if user has access to this questionnaire
     result = await db.execute(
-        select(QuestionnaireResponse)
-        .where(
-            (QuestionnaireResponse.id == response_id) & 
-            (QuestionnaireResponse.questionnaire_id == questionnaire_id) &
-            (QuestionnaireResponse.user_id == current_user.id)
-        )
-        .join(Questionnaire)
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == questionnaire_id)
     )
-    questionnaire_response = result.scalar_one_or_none()
+    questionnaire = result.scalar_one_or_none()
     
-    if not questionnaire_response:
+    if not questionnaire:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Questionnaire response not found"
+            detail="Questionnaire not found"
         )
     
-    if questionnaire_response.completed_at:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot modify answers for a completed questionnaire"
-        )
-    
-    # Check if question exists and belongs to questionnaire
+    # Get the count of responses
     result = await db.execute(
-        select(Question)
-        .where(
-            (Question.id == question_response.question_id) & 
-            (Question.questionnaire_id == questionnaire_id)
-        )
+        select(func.count(QuestionnaireResponseModel.id))
+        .where(QuestionnaireResponseModel.questionnaire_id == questionnaire_id)
     )
-    question = result.scalar_one_or_none()
+    count = result.scalar()
     
-    if not question:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Question not found"
-        )
-    
-    # Get or create question response
-    result = await db.execute(
-        select(QuestionResponse)
-        .where(
-            (QuestionResponse.question_id == question_response.question_id) &
-            (QuestionResponse.questionnaire_response_id == response_id)
-        )
-    )
-    existing_question_response = result.scalar_one_or_none()
-    
-    if existing_question_response:
-        # Update existing response
-        existing_question_response.answer = question_response.answer
-        existing_question_response.last_updated_at = datetime.now()
-        if question_response.interaction_batch_id:
-            existing_question_response.interaction_batch_id = question_response.interaction_batch_id
-    else:
-        # Create new response with question details
-        new_question_response = QuestionResponse(
-            question_id=question_response.question_id,
-            questionnaire_response_id=response_id,
-            question_text=question.text,
-            question_type=question.type,
-            question_configuration=question.configuration,
-            answer=question_response.answer,
-            interaction_batch_id=question_response.interaction_batch_id
-        )
-        db.add(new_question_response)
-    
-    await db.commit()
-    
-    # Ensure id is not None before passing to IdResponse
-    if new_question_response.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to generate question response ID"
-        )
-    
-    return schemas.IdResponse(id=new_question_response.id, message="Question response created successfully")
+    return schemas.CountResponse(count=count)
 
 # Get processor mappings for a questionnaire
 @router.get("/{questionnaire_id}/processors", response_model=List[schemas.QuestionnaireProcessorMappingResponse])
@@ -1227,8 +1318,8 @@ async def get_questionnaire_processors(
     """Get all processor mappings for a specific questionnaire"""
     # Get the questionnaire
     result = await db.execute(
-        select(Questionnaire)
-        .where(Questionnaire.id == questionnaire_id)
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == questionnaire_id)
     )
     questionnaire = result.scalar_one_or_none()
     
@@ -1258,8 +1349,8 @@ async def get_question_processors(
     """Get all question processor mappings for a specific questionnaire"""
     # Get the questionnaire
     result = await db.execute(
-        select(Questionnaire)
-        .where(Questionnaire.id == questionnaire_id)
+        select(QuestionnaireModel)
+        .where(QuestionnaireModel.id == questionnaire_id)
     )
     questionnaire = result.scalar_one_or_none()
     
@@ -1272,37 +1363,52 @@ async def get_question_processors(
     # Get question processor mappings
     result = await db.execute(
         select(QuestionProcessorMapping)
-        .join(Question)
-        .where(Question.questionnaire_id == questionnaire_id)
+        .join(QuestionModel)
+        .where(QuestionModel.questionnaire_id == questionnaire_id)
         .options(joinedload(QuestionProcessorMapping.processor))
     )
     mappings = result.unique().scalars().all()
     
     return mappings
 
-@router.get("/{questionnaire_id}/task-definitions", response_model=List[TaskDefinitionResponse])
+# Get task definitions for a questionnaire
+@router.get("/{questionnaire_id}/task-definitions", response_model=List[schemas.TaskDefinitionResponse])
 async def get_task_definitions(
     questionnaire_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session)
 ):
     """Get all task definitions for a questionnaire."""
-    # Get all task definitions for this questionnaire
-    result = await db.execute(
+    # Get questionnaire
+    questionnaire = await db.get(QuestionnaireModel, questionnaire_id)
+    if not questionnaire:
+        raise HTTPException(status_code=404, detail="Questionnaire not found")
+
+    # Check if user has access to this questionnaire
+    if current_user.role != UserRole.ADMINISTRATOR and questionnaire.created_by_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this questionnaire")
+
+    # Get task definitions with question mappings
+    query = (
         select(TaskDefinition)
         .where(TaskDefinition.questionnaire_id == questionnaire_id)
-        .options(joinedload(TaskDefinition.question_mappings))
+        .options(
+            joinedload(TaskDefinition.question_mappings).joinedload(QuestionProcessorMapping.question)
     )
+    )
+    result = await db.execute(query)
     task_definitions = result.unique().scalars().all()
 
     # Convert to response format
     return [
-        TaskDefinitionResponse(
+        schemas.TaskDefinitionResponse(
             id=td.id,
             processor_id=td.processor_id,
             questionnaire_id=td.questionnaire_id,
-            question_ids=[qm.question_id for qm in td.question_mappings],
-            is_active=td.is_active
+            is_active=td.is_active,
+            created_at=td.created_at,
+            updated_at=td.updated_at,
+            question_ids=[qm.question_id for qm in td.question_mappings]
         )
         for td in task_definitions
     ]
