@@ -1,54 +1,37 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { withAdmin } from '../../../lib/auth';
-import { callBackendApi } from '../../../lib/api';
+import { callBackendApi, validateMethod } from '../../../lib/api';
+import { withAuth } from '../../../lib/auth';
+
+const ALLOWED_METHODS = ['GET', 'PUT', 'DELETE'] as const;
+type AllowedMethod = typeof ALLOWED_METHODS[number];
 
 /**
  * API handler for operations on a specific user
  */
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
-  // Only allow supported methods
-  if (req.method !== 'GET' && req.method !== 'PATCH') {
-    return res.status(405).json({ message: 'Method not allowed' });
-  }
-
-  // Extract and validate ID
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { id } = req.query;
-  if (!id || Array.isArray(id)) {
-    return res.status(400).json({ message: 'Invalid user ID' });
+  const token = req.cookies.token;
+
+  if (!validateMethod(req, res, ALLOWED_METHODS)) {
+    return;
   }
 
-  // Apply admin authorization middleware
-  return withAdmin(req, res, async (req, res) => {
-    const token = req.cookies.token;
-    
-    try {
-      if (req.method === 'GET') {
-        // User retrieval
-        const data = await callBackendApi(`/users/${id}`, 'GET', null, token);
-        return res.status(200).json(data);
-      } 
-      else if (req.method === 'PATCH') {
-        // User update
-        const data = await callBackendApi(`/users/${id}`, 'PATCH', req.body, token);
-        return res.status(200).json(data);
-      }
-    } catch (error: any) {
-      console.error('Error in user API:', error);
-      
-      // Handle specific error status codes
-      if (error.response) {
-        const { status, data } = error.response;
-        return res.status(status).json({ 
-          message: data.detail || `Failed to ${req.method === 'GET' ? 'fetch' : 'update'} user` 
-        });
-      }
-      
-      return res.status(500).json({ 
-        message: `An error occurred while ${req.method === 'GET' ? 'fetching' : 'updating'} the user` 
-      });
-    }
-  });
+  try {
+    const data = await callBackendApi(
+      `/users/${id}`,
+      req.method as AllowedMethod,
+      req.body,
+      token,
+      { resource: 'users' }
+    );
+    res.status(200).json(data);
+  } catch (error: any) {
+    const status = error.response?.status || 500;
+    const message = error.response?.data?.detail || 'Internal Server Error';
+    res.status(status).json({ detail: message });
+  }
+}
+
+export default function userHandler(req: NextApiRequest, res: NextApiResponse) {
+  return withAuth(req, res, handler);
 } 

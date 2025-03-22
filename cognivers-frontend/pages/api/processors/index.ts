@@ -1,14 +1,23 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { callBackendApi } from '../../../lib/api';
+import { callBackendApi, validateMethod } from '../../../lib/api';
 import { withAuth } from '../../../lib/auth';
 
+const ALLOWED_METHODS = ['GET', 'POST'] as const;
+type AllowedMethod = typeof ALLOWED_METHODS[number];
+
 async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const token = req.cookies.token;
+
+  if (!validateMethod(req, res, ALLOWED_METHODS)) {
+    return;
+  }
+
   try {
     const data = await callBackendApi(
       '/processors',
-      req.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+      req.method as AllowedMethod,
       req.body,
-      req.cookies.token,
+      token,
       { resource: 'processors' }
     );
     res.status(200).json(data);

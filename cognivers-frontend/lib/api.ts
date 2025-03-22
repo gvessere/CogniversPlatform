@@ -21,6 +21,7 @@ import {
   QuestionProcessorMapping,
   TaskDefinition
 } from './types';
+import { NextApiRequest, NextApiResponse } from 'next';
 
 /**
  * API Call Pattern Documentation
@@ -1218,7 +1219,7 @@ export const createProcessor = async (data: Omit<Processor, 'id' | 'created_at' 
 };
 
 export const updateProcessor = async (id: number, data: Partial<Processor>): Promise<Processor> => {
-  return patchData(`/api/processors/${id}`, data);
+  return callFrontendApi(`/api/processors/${id}`, 'PUT', data);
 };
 
 export const deleteProcessor = async (id: number): Promise<void> => {
@@ -1329,6 +1330,28 @@ export const listQuestionnaireResponses = async (
 
   return response.json();
 };
+
+/**
+ * Validates that the request method is one of the allowed methods
+ * @param req Next.js API request
+ * @param res Next.js API response
+ * @param allowedMethods Array of allowed HTTP methods
+ * @returns true if method is valid, false if invalid (and sends 405 response)
+ */
+export function validateMethod(
+  req: NextApiRequest,
+  res: NextApiResponse,
+  allowedMethods: readonly string[]
+): boolean {
+  const method = req.method || '';
+  if (!allowedMethods.includes(method)) {
+    res.status(405).json({ 
+      detail: `Method Not Allowed. Supported methods: ${allowedMethods.join(', ')}`
+    });
+    return false;
+  }
+  return true;
+}
 
 // No longer exporting any axios instances
 export default {}; 

@@ -349,41 +349,45 @@ async def get_questionnaire_instances(
     return [QuestionnaireInstanceResponse.model_validate(instance) for instance in instances]
 
 async def create_questionnaire_instance(
+    session_id: int,
     instance_data: QuestionnaireInstanceCreate,
     current_user: User,
     db: AsyncSession
 ) -> QuestionnaireInstanceResponse:
-    """Create a new questionnaire instance attached to a session"""
+    """Create a new questionnaire instance"""
     if not is_trainer_or_admin(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers and admins can attach questionnaires to sessions"
+            detail="Only trainers and admins can create questionnaires attached to sessions"
         )
     
-    session = await get_session_by_id(instance_data.session_id, db)
-    
-    # Check if the questionnaire exists
-    questionnaire = await db.get(Questionnaire, instance_data.questionnaire_id)
-    if not questionnaire:
+    # Get the session
+    session = await db.get(Session, session_id)
+    if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Questionnaire with ID {instance_data.questionnaire_id} not found"
+            detail=f"Session with ID {session_id} not found"
         )
     
-    # Create the questionnaire instance
+    # Create new instance
     new_instance = QuestionnaireInstance(
-        session_id=instance_data.session_id,
+        session_id=session_id,
         questionnaire_id=instance_data.questionnaire_id,
-        is_active=instance_data.is_active,
+        is_active=True,
         created_by=current_user.id,
-        updated_by=current_user.id
+        created_at=datetime.now(),
+        updated_at=datetime.now()
     )
     
     db.add(new_instance)
     await db.commit()
+    
+    # First refresh loads the basic instance data after commit
     await db.refresh(new_instance)
     
-    # Load the related questionnaire
+    # Second refresh loads the related questionnaire data needed for the response model
+    # This is necessary because QuestionnaireInstanceResponse uses model_validate
+    # which requires the full object state including relationships
     await db.refresh(new_instance, ["questionnaire"])
     
     return QuestionnaireInstanceResponse.model_validate(new_instance)
@@ -417,9 +421,13 @@ async def update_questionnaire_instance(
     instance.updated_at = datetime.now()
     
     await db.commit()
+    
+    # First refresh loads the updated instance data after commit
     await db.refresh(instance)
     
-    # Load the related questionnaire
+    # Second refresh loads the related questionnaire data needed for the response model
+    # This is necessary because QuestionnaireInstanceResponse uses model_validate
+    # which requires the full object state including relationships
     await db.refresh(instance, ["questionnaire"])
     
     return QuestionnaireInstanceResponse.model_validate(instance)
@@ -472,7 +480,9 @@ async def activate_questionnaire_instance(
     instance.is_active = True
     instance.updated_at = datetime.now()
     
-    # Load the related questionnaire before committing
+    # Load the related questionnaire data needed for the response model
+    # This is necessary because QuestionnaireInstanceResponse uses model_validate
+    # which requires the full object state including relationships
     await db.refresh(instance, ["questionnaire"])
     
     await db.commit()
@@ -502,7 +512,9 @@ async def deactivate_questionnaire_instance(
     instance.is_active = False
     instance.updated_at = datetime.now()
     
-    # Load the related questionnaire before committing
+    # Load the related questionnaire data needed for the response model
+    # This is necessary because QuestionnaireInstanceResponse uses model_validate
+    # which requires the full object state including relationships
     await db.refresh(instance, ["questionnaire"])
     
     await db.commit()
@@ -534,7 +546,7 @@ async def add_questionnaire_to_session(
         **instance_data.model_dump(),
         session_id=session_id
     )
-    return await create_questionnaire_instance(instance_data_with_session, current_user, db)
+    return await create_questionnaire_instance(session_id, instance_data_with_session, current_user, db)
 
 # Individual questionnaire endpoints
 @router.get("/questionnaires/{questionnaire_id}", response_model=QuestionnaireInstanceResponse)

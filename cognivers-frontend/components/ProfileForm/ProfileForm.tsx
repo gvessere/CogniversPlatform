@@ -60,7 +60,11 @@ export default function ProfileForm(): React.ReactElement {
     }
 
     try {
-      await callFrontendApi('/api/users/me', 'PATCH', values);
+      setSubmitting(true);
+      setStatus({ type: null, message: '' });
+
+      // Update user profile
+      await callFrontendApi('/api/users/me', 'PUT', values);
       
       // Show success message
       setStatus({
@@ -68,20 +72,13 @@ export default function ProfileForm(): React.ReactElement {
         message: 'Profile updated successfully'
       });
       
-      // Refresh user data in context
+      // Refresh user data
       await refreshUserData();
-    } catch (error: any) {
-      console.error('Profile update error:', error);
-      
-      // Extract error message
-      let errorMessage = 'Failed to update profile';
-      if (error.response?.data?.detail) {
-        errorMessage = error.response.data.detail;
-      }
-      
+    } catch (err: any) {
+      console.error('Error updating profile:', err);
       setStatus({
         type: 'error',
-        message: errorMessage
+        message: err.response?.data?.detail || 'Failed to update profile'
       });
     } finally {
       setSubmitting(false);

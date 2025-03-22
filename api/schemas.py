@@ -717,6 +717,12 @@ class ProcessorResponse(ProcessorBase, BaseResponseModel):
     created_by_id: int
     created_at: datetime
     updated_at: datetime
+    llm_system_prompt: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_temperature: Optional[float] = None
+    llm_max_tokens: Optional[int] = None
+    llm_stop_sequences: Optional[List[str]] = None
+    is_active: bool = True
 
     class Config(BaseResponseModel.Config):
         json_schema_extra = {
@@ -730,7 +736,13 @@ class ProcessorResponse(ProcessorBase, BaseResponseModel):
                 "status": "ACTIVE",
                 "created_by_id": 1,
                 "created_at": "2024-01-01T00:00:00",
-                "updated_at": "2024-01-01T00:00:00"
+                "updated_at": "2024-01-01T00:00:00",
+                "llm_system_prompt": "System prompt text",
+                "llm_model": "Model name",
+                "llm_temperature": 0.7,
+                "llm_max_tokens": 100,
+                "llm_stop_sequences": ["Stop sequence 1", "Stop sequence 2"],
+                "is_active": True
             }
         }
 
@@ -801,7 +813,7 @@ class ProcessingResultResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
-
+    
     class Config:
         from_attributes = True
         json_schema_extra = {
@@ -820,7 +832,7 @@ class ProcessingResultResponse(BaseModel):
 class ProcessingResultDetailResponse(ProcessingResultResponse):
     error_message: Optional[str] = None
     processing_time_ms: Optional[int] = None
-
+    
     class Config:
         from_attributes = True
         json_schema_extra = {
@@ -840,7 +852,7 @@ class ProcessingResultDetailResponse(ProcessingResultResponse):
 
 class RequeueRequest(BaseModel):
     processor_id: int
-
+    
     class Config:
         json_schema_extra = {
             "example": {

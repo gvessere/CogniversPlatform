@@ -81,7 +81,6 @@ async def create_processor(
     
     db.add(new_processor)
     await db.commit()
-    await db.refresh(new_processor)
     
     return new_processor
 
@@ -167,7 +166,6 @@ async def update_processor(
     
     existing_processor.updated_at = datetime.now()
     await db.commit()
-    await db.refresh(existing_processor)
     
     return existing_processor
 
