@@ -7,7 +7,7 @@ from datetime import datetime
 from database import get_async_session
 from models.processors import (
     Processor, QuestionnaireProcessorMapping, QuestionProcessorMapping,
-    ProcessingResult, ProcessorStatus, InterpreterType
+    ProcessingResult, ProcessorStatus, InterpreterType, TaskDefinition
 )
 from models.questionnaire import Questionnaire, QuestionnaireResponse, Question
 from models.user import User, UserRole
@@ -241,32 +241,38 @@ async def assign_processor(
             detail="One or more questions not found or do not belong to the questionnaire"
         )
     
+    # Check for existing task definitions for this processor and questionnaire
+    result = await db.execute(
+        select(TaskDefinition)
+        .where(
+            (TaskDefinition.processor_id == processor_id) &
+            (TaskDefinition.questionnaire_id == mapping_data.questionnaire_id)
+        )
+        .order_by(TaskDefinition.created_at.desc())
+    )
+    existing_task_definitions = result.scalars().all()
+    
+    # Create a new task definition
+    task_definition = TaskDefinition(
+        processor_id=processor_id,
+        questionnaire_id=mapping_data.questionnaire_id,
+        is_active=mapping_data.is_active
+    )
+    db.add(task_definition)
+    await db.flush()  # Get the task_definition.id
+    
     # Create new mappings
     new_mappings = []
     for question_id in mapping_data.question_ids:
-        # Check if mapping already exists
-        result = await db.execute(
-            select(QuestionProcessorMapping)
-            .where(
-                (QuestionProcessorMapping.processor_id == processor_id) &
-                (QuestionProcessorMapping.question_id == question_id)
-            )
+        # Create new mapping
+        new_mapping = QuestionProcessorMapping(
+            processor_id=processor_id,
+            question_id=question_id,
+            task_definition_id=task_definition.id,
+            is_active=mapping_data.is_active
         )
-        existing_mapping = result.scalar_one_or_none()
-        
-        if existing_mapping:
-            # Update existing mapping
-            existing_mapping.is_active = mapping_data.is_active
-            new_mappings.append(existing_mapping)
-        else:
-            # Create new mapping
-            new_mapping = QuestionProcessorMapping(
-                processor_id=processor_id,
-                question_id=question_id,
-                is_active=mapping_data.is_active
-            )
-            db.add(new_mapping)
-            new_mappings.append(new_mapping)
+        db.add(new_mapping)
+        new_mappings.append(new_mapping)
     
     await db.commit()
     return new_mappings

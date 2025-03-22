@@ -25,13 +25,30 @@ import {
   CircularProgress,
   Tooltip,
   Chip,
-  Stack
+  Stack,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  List,
+  ListItem,
+  ListItemSecondaryAction,
+  Divider
 } from '@mui/material';
 import AssignmentIcon from '@mui/icons-material/Assignment';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { withNavigationLayout } from '../../../utils/layout';
 import { callFrontendApi } from '../../../lib/api';
 import { formatErrorMessage } from '../../../utils/errorUtils';
-import { Questionnaire, Processor, User, QuestionnaireProcessorMapping } from '../../../lib/types';
+import { Questionnaire, Processor, User, QuestionnaireProcessorMapping, QuestionProcessorMapping } from '../../../lib/types';
+
+interface TaskDefinition {
+  id: number;
+  processor_id: number;
+  questionnaire_id: number;
+  question_ids: number[];
+  is_active: boolean;
+}
 
 export default function QuestionnaireManagement() {
   const [questionnaires, setQuestionnaires] = useState<Questionnaire[]>([]);
@@ -43,7 +60,8 @@ export default function QuestionnaireManagement() {
   const [selectedQuestionnaire, setSelectedQuestionnaire] = useState<Questionnaire | null>(null);
   const [selectedProcessor, setSelectedProcessor] = useState<number | null>(null);
   const [selectedQuestions, setSelectedQuestions] = useState<number[]>([]);
-  const [processorMappings, setProcessorMappings] = useState<Record<number, QuestionnaireProcessorMapping[]>>({});
+  const [taskDefinitions, setTaskDefinitions] = useState<Record<number, TaskDefinition[]>>({});
+  const [expandedQuestionnaire, setExpandedQuestionnaire] = useState<number | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -56,11 +74,17 @@ export default function QuestionnaireManagement() {
         callFrontendApi<Questionnaire[]>('/api/questionnaires', 'GET'),
         callFrontendApi<Processor[]>('/api/processors', 'GET')
       ]);
-      setQuestionnaires(questionnairesData);
+      
+      // Fetch full questionnaire details including questions
+      const fullQuestionnairePromises = questionnairesData.map(q => 
+        callFrontendApi<Questionnaire>(`/api/questionnaires/${q.id}`, 'GET')
+      );
+      const fullQuestionnaires = await Promise.all(fullQuestionnairePromises);
+      setQuestionnaires(fullQuestionnaires);
       setProcessors(processorsData);
 
       // Fetch user information for all unique creator IDs
-      const uniqueCreatorIds = [...new Set(questionnairesData.map(q => q.created_by_id))];
+      const uniqueCreatorIds = [...new Set(fullQuestionnaires.map(q => q.created_by_id))];
       const userPromises = uniqueCreatorIds.map(id => 
         callFrontendApi<User>(`/api/users/${id}`, 'GET')
       );
@@ -71,16 +95,16 @@ export default function QuestionnaireManagement() {
       }, {} as Record<number, User>);
       setUsers(userMap);
 
-      // Fetch processor mappings for each questionnaire
-      const mappingPromises = questionnairesData.map(q => 
-        callFrontendApi<QuestionnaireProcessorMapping[]>(`/api/questionnaires/${q.id}/processors`, 'GET')
+      // Fetch task definitions for each questionnaire
+      const taskDefinitionPromises = fullQuestionnaires.map(q => 
+        callFrontendApi<TaskDefinition[]>(`/api/questionnaires/${q.id}/task-definitions`, 'GET')
       );
-      const mappingResults = await Promise.all(mappingPromises);
-      const mappingMap = mappingResults.reduce((acc, mappings, index) => {
-        acc[questionnairesData[index].id] = mappings;
+      const taskDefinitionResults = await Promise.all(taskDefinitionPromises);
+      const taskDefinitionMap = taskDefinitionResults.reduce((acc, definitions, index) => {
+        acc[fullQuestionnaires[index].id] = definitions;
         return acc;
-      }, {} as Record<number, QuestionnaireProcessorMapping[]>);
-      setProcessorMappings(mappingMap);
+      }, {} as Record<number, TaskDefinition[]>);
+      setTaskDefinitions(taskDefinitionMap);
     } catch (err) {
       console.error('Error fetching data:', err);
       setError('Failed to load data. Please try again later.');
@@ -112,10 +136,20 @@ export default function QuestionnaireManagement() {
       setOpenProcessorDialog(false);
       setSelectedProcessor(null);
       setSelectedQuestions([]);
-      fetchData(); // Refresh to get updated processor assignments
+      fetchData(); // Refresh to get updated task definitions
     } catch (err) {
       console.error('Error assigning processor:', err);
       setError('Failed to assign processor. Please try again later.');
+    }
+  };
+
+  const handleRemoveTaskDefinition = async (taskDefinitionId: number) => {
+    try {
+      await callFrontendApi(`/api/questionnaires/task-definitions/${taskDefinitionId}`, 'DELETE');
+      fetchData(); // Refresh to get updated task definitions
+    } catch (err) {
+      console.error('Error removing task definition:', err);
+      setError('Failed to remove task definition. Please try again later.');
     }
   };
 
@@ -135,6 +169,10 @@ export default function QuestionnaireManagement() {
   const getProcessorName = (processorId: number) => {
     const processor = processors.find(p => p.id === processorId);
     return processor ? processor.name : `ID: ${processorId}`;
+  };
+
+  const handleAccordionChange = (questionnaireId: number) => {
+    setExpandedQuestionnaire(expandedQuestionnaire === questionnaireId ? null : questionnaireId);
   };
 
   if (loading) {
@@ -157,47 +195,75 @@ export default function QuestionnaireManagement() {
         </Alert>
       )}
 
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Title</TableCell>
-              <TableCell>Type</TableCell>
-              <TableCell>Created By</TableCell>
-              <TableCell>Processors</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {questionnaires.map((questionnaire) => (
-              <TableRow key={questionnaire.id}>
-                <TableCell>{questionnaire.title}</TableCell>
-                <TableCell>{questionnaire.type}</TableCell>
-                <TableCell>{getCreatorName(questionnaire.created_by_id)}</TableCell>
-                <TableCell>
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {processorMappings[questionnaire.id]?.map((mapping) => (
-                      <Chip
-                        key={mapping.id}
-                        label={getProcessorName(mapping.processor_id)}
-                        color={mapping.is_active ? "primary" : "default"}
-                        size="small"
+      {questionnaires.map((questionnaire) => (
+        <Accordion
+          key={questionnaire.id}
+          expanded={expandedQuestionnaire === questionnaire.id}
+          onChange={() => handleAccordionChange(questionnaire.id)}
+          sx={{ mb: 2 }}
+        >
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', justifyContent: 'space-between' }}>
+              <Box>
+                <Typography variant="h6">{questionnaire.title}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Type: {questionnaire.type} | Created by: {getCreatorName(questionnaire.created_by_id)}
+                </Typography>
+              </Box>
+              <Tooltip title="Create Task Definition">
+                <IconButton onClick={(e) => {
+                  e.stopPropagation();
+                  handleAssignProcessor(questionnaire);
+                }}>
+                  <AssignmentIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Typography variant="subtitle1" gutterBottom>
+              Task Definitions
+            </Typography>
+            <List>
+              {taskDefinitions[questionnaire.id]?.map((taskDefinition) => {
+                const processor = processors.find(p => p.id === taskDefinition.processor_id);
+                const questions = questionnaire.questions.filter(q => taskDefinition.question_ids.includes(q.id));
+                return (
+                  <React.Fragment key={taskDefinition.id}>
+                    <ListItem>
+                      <ListItemText
+                        primary={processor?.name || `Processor ${taskDefinition.processor_id}`}
+                        secondary={
+                          <Box>
+                            <Typography variant="body2" color="text.secondary">
+                              Questions: {questions.map(q => q.text).join(', ')}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Status: {taskDefinition.is_active ? 'Active' : 'Inactive'}
+                            </Typography>
+                          </Box>
+                        }
                       />
-                    ))}
-                  </Stack>
-                </TableCell>
-                <TableCell>
-                  <Tooltip title="Assign Processor">
-                    <IconButton onClick={() => handleAssignProcessor(questionnaire)}>
-                      <AssignmentIcon />
-                    </IconButton>
-                  </Tooltip>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+                      <ListItemSecondaryAction>
+                        <Tooltip title="Remove Task Definition">
+                          <IconButton 
+                            edge="end" 
+                            onClick={() => handleRemoveTaskDefinition(taskDefinition.id)}
+                            size="small"
+                          >
+                            <DeleteIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </ListItemSecondaryAction>
+                    </ListItem>
+                    <Divider />
+                  </React.Fragment>
+                );
+              })}
+            </List>
+          </AccordionDetails>
+        </Accordion>
+      ))}
 
       {/* Processor Assignment Dialog */}
       <Dialog 
@@ -206,7 +272,7 @@ export default function QuestionnaireManagement() {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle>Assign Processor to Questions</DialogTitle>
+        <DialogTitle>Create Task Definition</DialogTitle>
         <DialogContent>
           {selectedQuestionnaire && (
             <>
@@ -247,7 +313,7 @@ export default function QuestionnaireManagement() {
             variant="contained"
             disabled={!selectedProcessor || selectedQuestions.length === 0}
           >
-            Assign Processor
+            Create Task Definition
           </Button>
         </DialogActions>
       </Dialog>

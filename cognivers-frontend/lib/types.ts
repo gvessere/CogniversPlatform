@@ -243,4 +243,12 @@ export interface QuestionProcessorMapping {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface TaskDefinition {
+  id: number;
+  processor_id: number;
+  questionnaire_id: number;
+  question_ids: number[];
+  is_active: boolean;
 } 

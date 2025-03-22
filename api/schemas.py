@@ -1008,3 +1008,21 @@ class QuestionnaireProcessorMappingResponse(BaseResponseModel):
             }
         }
 
+class TaskDefinitionResponse(BaseResponseModel):
+    id: int
+    processor_id: int
+    questionnaire_id: int
+    question_ids: List[int]
+    is_active: bool
+
+    class Config(BaseResponseModel.Config):
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "processor_id": 1,
+                "questionnaire_id": 1,
+                "question_ids": [1, 2, 3],
+                "is_active": True
+            }
+        }
+

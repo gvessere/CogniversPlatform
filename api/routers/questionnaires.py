@@ -14,7 +14,9 @@ from models.questionnaire import (
     QuestionType, QuestionnaireType, ClientSessionEnrollment, QuestionnaireInstance,
     Session
 )
-from models.processors import QuestionnaireProcessorMapping
+from models.processors import (
+    QuestionnaireProcessorMapping, QuestionProcessorMapping, TaskDefinition
+)
 from models.user import User, UserRole
 from models.interaction import InteractionBatch
 from auth.dependencies import get_current_user
@@ -26,7 +28,9 @@ from schemas import (
     QuestionnaireClientResponse,
     QuestionnaireAttemptResponse,
     QuestionnaireAttemptsResponse,
-    QuestionnaireProcessorMappingResponse
+    QuestionnaireProcessorMappingResponse,
+    QuestionProcessorMappingResponse,
+    TaskDefinitionResponse
 )
 
 # Helper function to convert type strings to QuestionnaireType enum
@@ -1242,4 +1246,97 @@ async def get_questionnaire_processors(
     )
     mappings = result.unique().scalars().all()
     
-    return mappings 
+    return mappings
+
+# Get question processor mappings for a questionnaire
+@router.get("/{questionnaire_id}/question-processors", response_model=List[schemas.QuestionProcessorMappingResponse])
+async def get_question_processors(
+    questionnaire_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Get all question processor mappings for a specific questionnaire"""
+    # Get the questionnaire
+    result = await db.execute(
+        select(Questionnaire)
+        .where(Questionnaire.id == questionnaire_id)
+    )
+    questionnaire = result.scalar_one_or_none()
+    
+    if not questionnaire:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Questionnaire not found"
+        )
+    
+    # Get question processor mappings
+    result = await db.execute(
+        select(QuestionProcessorMapping)
+        .join(Question)
+        .where(Question.questionnaire_id == questionnaire_id)
+        .options(joinedload(QuestionProcessorMapping.processor))
+    )
+    mappings = result.unique().scalars().all()
+    
+    return mappings
+
+@router.get("/{questionnaire_id}/task-definitions", response_model=List[TaskDefinitionResponse])
+async def get_task_definitions(
+    questionnaire_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Get all task definitions for a questionnaire."""
+    # Get all task definitions for this questionnaire
+    result = await db.execute(
+        select(TaskDefinition)
+        .where(TaskDefinition.questionnaire_id == questionnaire_id)
+        .options(joinedload(TaskDefinition.question_mappings))
+    )
+    task_definitions = result.unique().scalars().all()
+
+    # Convert to response format
+    return [
+        TaskDefinitionResponse(
+            id=td.id,
+            processor_id=td.processor_id,
+            questionnaire_id=td.questionnaire_id,
+            question_ids=[qm.question_id for qm in td.question_mappings],
+            is_active=td.is_active
+        )
+        for td in task_definitions
+    ]
+
+@router.delete("/task-definitions/{task_definition_id}", response_model=schemas.MessageResponse)
+async def delete_task_definition(
+    task_definition_id: int,
+    current_user: User = Depends(check_admin_or_trainer),
+    db: AsyncSession = Depends(get_async_session)
+):
+    """Delete a task definition and all its associated question processor mappings."""
+    # First find the task definition
+    result = await db.execute(
+        select(TaskDefinition)
+        .where(TaskDefinition.id == task_definition_id)
+    )
+    task_definition = result.scalar_one_or_none()
+    
+    if not task_definition:
+        raise HTTPException(status_code=404, detail="Task definition not found")
+    
+    # Get all mappings for this task definition
+    result = await db.execute(
+        select(QuestionProcessorMapping)
+        .where(QuestionProcessorMapping.task_definition_id == task_definition_id)
+    )
+    mappings = result.scalars().all()
+    
+    # Delete all mappings
+    for mapping in mappings:
+        await db.delete(mapping)
+    
+    # Delete the task definition
+    await db.delete(task_definition)
+    await db.commit()
+    
+    return schemas.MessageResponse(message="Task definition deleted successfully") 

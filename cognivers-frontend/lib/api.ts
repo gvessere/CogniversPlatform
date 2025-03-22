@@ -18,7 +18,8 @@ import {
   Processor,
   QuestionnaireProcessorMapping,
   ProcessingResult,
-  QuestionProcessorMapping
+  QuestionProcessorMapping,
+  TaskDefinition
 } from './types';
 
 /**
@@ -1247,6 +1248,14 @@ export const getProcessingResults = async (responseId: number): Promise<Processi
 
 export const requeueProcessing = async (responseId: number, processorId?: number): Promise<void> => {
   return postData(`/api/processors/requeue/${responseId}`, { processor_id: processorId });
+};
+
+export const getQuestionProcessorMappings = async (questionnaireId: number): Promise<QuestionProcessorMapping[]> => {
+  return getData(`/api/questionnaires/${questionnaireId}/question-processors`);
+};
+
+export const getTaskDefinitions = async (questionnaireId: number): Promise<TaskDefinition[]> => {
+  return getData(`/api/questionnaires/${questionnaireId}/task-definitions`);
 };
 
 // No longer exporting any axios instances

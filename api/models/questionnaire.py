@@ -6,7 +6,7 @@ from enum import Enum
 
 if TYPE_CHECKING:
     from models.interaction import InteractionBatch
-    from models.processors import ProcessingResult, QuestionnaireProcessorMapping, QuestionProcessorMapping
+    from models.processors import ProcessingResult, QuestionnaireProcessorMapping, QuestionProcessorMapping, TaskDefinition
     from models.user import User
 
 class QuestionType(str, Enum):
@@ -61,6 +61,7 @@ class Questionnaire(SQLModel, table=True):
     responses: List["QuestionnaireResponse"] = Relationship(back_populates="questionnaire")
     processors: List["QuestionnaireProcessorMapping"] = Relationship(back_populates="questionnaire")
     instances: List["QuestionnaireInstance"] = Relationship(back_populates="questionnaire")
+    task_definitions: List["TaskDefinition"] = Relationship(back_populates="questionnaire")
 
 class QuestionnaireInstance(SQLModel, table=True):
     __tablename__ = "questionnaire_instances"
@@ -79,25 +80,26 @@ class QuestionnaireInstance(SQLModel, table=True):
     responses: List["QuestionnaireResponse"] = Relationship(back_populates="questionnaire_instance")
 
 class Question(SQLModel, table=True):
-    """Question model for questionnaires"""
+    """Question model for questionnaire templates"""
     __tablename__ = "questions"
     
     id: Optional[int] = Field(default=None, primary_key=True)
     questionnaire_id: int = Field(foreign_key="questionnaires.id")
     text: str
     type: QuestionType = Field(sa_column=Column(SQLEnum(QuestionType)))
+    configuration: Dict = Field(sa_column=Column(JSON))  # Store question configuration including options
     order: int
+    page_number: int = Field(default=1)
     is_required: bool = Field(default=True)
     time_limit_seconds: Optional[int] = None
-    configuration: Dict = Field(sa_column=Column(JSON))
-    page_number: int = Field(default=1)
+    is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     
     # Relationships
-    questionnaire: Questionnaire = Relationship(back_populates="questions")
+    questionnaire: "Questionnaire" = Relationship(back_populates="questions")
     responses: List["QuestionResponse"] = Relationship(back_populates="question")
-    processors: List["QuestionProcessorMapping"] = Relationship(back_populates="question")
+    processor_mappings: List["QuestionProcessorMapping"] = Relationship(back_populates="question")
 
 class QuestionnaireResponse(SQLModel, table=True):
     __tablename__ = "questionnaire_responses"

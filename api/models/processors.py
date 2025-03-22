@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import Optional, Dict, List, Any, TYPE_CHECKING
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import Column, JSON, Text, Enum as SQLEnum
+from sqlalchemy import Column, JSON, Text, Enum as SQLEnum, Integer, ForeignKey, Boolean, DateTime, func
 from enum import Enum
+from sqlalchemy.orm import relationship
 
 if TYPE_CHECKING:
     from models.questionnaire import QuestionnaireResponse, Questionnaire, Question
@@ -60,8 +61,9 @@ class Processor(SQLModel, table=True):
     
     # Relationships
     questionnaires: List["QuestionnaireProcessorMapping"] = Relationship(back_populates="processor")
-    questions: List["QuestionProcessorMapping"] = Relationship(back_populates="processor")
+    question_mappings: List["QuestionProcessorMapping"] = Relationship(back_populates="processor")
     results: List["ProcessingResult"] = Relationship(back_populates="processor")
+    task_definitions: List["TaskDefinition"] = Relationship(back_populates="processor")
 
 class QuestionnaireProcessorMapping(SQLModel, table=True):
     """Mapping between questionnaires and processors"""
@@ -77,20 +79,38 @@ class QuestionnaireProcessorMapping(SQLModel, table=True):
     questionnaire: "Questionnaire" = Relationship(back_populates="processors")
     processor: Processor = Relationship(back_populates="questionnaires")
 
-class QuestionProcessorMapping(SQLModel, table=True):
-    """Mapping between questions and processors"""
-    __tablename__ = "question_processor_mappings"
+class TaskDefinition(SQLModel, table=True):
+    """Task definition that groups questions for a processor"""
+    __tablename__ = "task_definitions"
     
     id: Optional[int] = Field(default=None, primary_key=True)
-    question_id: int = Field(foreign_key="questions.id")
     processor_id: int = Field(foreign_key="processors.id")
+    questionnaire_id: int = Field(foreign_key="questionnaires.id")
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
     
     # Relationships
-    question: "Question" = Relationship(back_populates="processors")
-    processor: Processor = Relationship(back_populates="questions")
+    processor: "Processor" = Relationship(back_populates="task_definitions")
+    questionnaire: "Questionnaire" = Relationship(back_populates="task_definitions")
+    question_mappings: List["QuestionProcessorMapping"] = Relationship(back_populates="task_definition")
+
+class QuestionProcessorMapping(SQLModel, table=True):
+    """Mapping between questions and processors"""
+    __tablename__ = "question_processor_mappings"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    processor_id: int = Field(foreign_key="processors.id")
+    question_id: int = Field(foreign_key="questions.id")
+    task_definition_id: Optional[int] = Field(foreign_key="task_definitions.id", default=None)
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    
+    # Relationships
+    processor: "Processor" = Relationship(back_populates="question_mappings")
+    question: "Question" = Relationship(back_populates="processor_mappings")
+    task_definition: Optional["TaskDefinition"] = Relationship(back_populates="question_mappings")
 
 class ProcessingResult(SQLModel, table=True):
     """Results of processing questionnaire responses"""
